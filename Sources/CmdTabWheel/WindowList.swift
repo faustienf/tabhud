@@ -34,7 +34,8 @@ struct AppWindow: Equatable {
 enum WindowList {
     /// The windows of these apps the wheel offers. Each app's list starts with its windows on
     /// screen, front to back, then come the ones on other desktops (full-screen ones too), then
-    /// minimized ones. Not here: windows of hidden apps, and the ones apps keep out of sight.
+    /// minimized ones. Not here: windows of hidden apps, the ones apps keep out of sight, and
+    /// the ones that belong to another window (bubbles, sheets).
     static func windowsByApp(of apps: Set<pid_t>) -> [pid_t: [AppWindow]] {
         var result = onScreenWindowsByApp().filter { apps.contains($0.key) }
         let shown = Set(result.values.flatMap { $0.map { $0.id } })
@@ -52,8 +53,9 @@ enum WindowList {
     static func onScreenWindowsByApp() -> [pid_t: [AppWindow]] {
         var result: [pid_t: [AppWindow]] = [:]
         // The list is ordered front to back, so each app's windows come out in z-order too.
-        for info in list([.optionOnScreenOnly, .excludeDesktopElements]) {
-            guard let window = NormalWindow(info) else { continue }
+        let windows = list([.optionOnScreenOnly, .excludeDesktopElements]).compactMap(NormalWindow.init)
+        let children = Spaces.childWindows(among: windows.map(\.id))
+        for window in windows where !children.contains(window.id) {
             result[window.pid, default: []].append(AppWindow(id: window.id, title: window.title))
         }
         return result
@@ -151,6 +153,7 @@ private enum Spaces {
     private typealias WindowIteratorAdvance = @convention(c) (CFTypeRef) -> Bool
     private typealias WindowIteratorGetTags = @convention(c) (CFTypeRef) -> UInt64
     private typealias WindowIteratorGetWindowID = @convention(c) (CFTypeRef) -> UInt32
+    private typealias WindowIteratorGetParentID = @convention(c) (CFTypeRef) -> UInt32
 
     private static let mainConnectionID: MainConnectionID? = symbol("SLSMainConnectionID")
     private static let copyManagedDisplaySpaces: CopyManagedDisplaySpaces? = symbol("SLSCopyManagedDisplaySpaces")
@@ -161,6 +164,7 @@ private enum Spaces {
     private static let windowIteratorAdvance: WindowIteratorAdvance? = symbol("SLSWindowIteratorAdvance")
     private static let windowIteratorGetTags: WindowIteratorGetTags? = symbol("SLSWindowIteratorGetTags")
     private static let windowIteratorGetWindowID: WindowIteratorGetWindowID? = symbol("SLSWindowIteratorGetWindowID")
+    private static let windowIteratorGetParentID: WindowIteratorGetParentID? = symbol("SLSWindowIteratorGetParentID")
     /// Spaces of every kind: user desktops, full-screen apps, system ones.
     private static let allSpaces: Int32 = 0x7
     /// Window query options: the windows a desktop shows; those plus its invisible ones.
@@ -211,24 +215,41 @@ private enum Spaces {
         return result
     }
 
+    /// The windows among these that belong to another window: a bubble under a browser's
+    /// toolbar, a sheet. They show and hide with it, they aren't windows of their own (yabai
+    /// leaves them out too). Empty when it can't be told.
+    static func childWindows(among ids: [CGWindowID]) -> Set<CGWindowID> {
+        guard let mainConnectionID, !ids.isEmpty else { return [] }
+        let query = windowQueryWindows?(mainConnectionID(), ids.map { NSNumber(value: $0) } as CFArray, Int32(ids.count))
+        return Set(windows(of: query?.takeRetainedValue()).filter { $0.parent != 0 }.map(\.id))
+    }
+
+    /// The windows of their own on these Spaces (child windows left out).
     private static func windows(on spaces: [Int], options: UInt32) -> [(id: CGWindowID, tags: UInt64)] {
-        guard let mainConnectionID, let copyWindowsWithOptionsAndTags, let windowQueryWindows,
-              let windowQueryResultCopyWindows, let windowIteratorAdvance, let windowIteratorGetTags,
-              let windowIteratorGetWindowID, !spaces.isEmpty
-        else { return [] }
+        guard let mainConnectionID, let copyWindowsWithOptionsAndTags, !spaces.isEmpty else { return [] }
         let connection = mainConnectionID()
         var setTags: UInt64 = 1
         var clearTags: UInt64 = 0
         guard let ids = copyWindowsWithOptionsAndTags(
                   connection, 0, spaces.map { NSNumber(value: $0) } as CFArray, options, &setTags, &clearTags
               )?.takeRetainedValue(),
-              CFArrayGetCount(ids) > 0,
-              let query = windowQueryWindows(connection, ids, Int32(CFArrayGetCount(ids)))?.takeRetainedValue(),
+              CFArrayGetCount(ids) > 0
+        else { return [] }
+        let query = windowQueryWindows?(connection, ids, Int32(CFArrayGetCount(ids)))
+        return windows(of: query?.takeRetainedValue()).filter { $0.parent == 0 }.map { ($0.id, $0.tags) }
+    }
+
+    /// What a window query found.
+    private static func windows(of query: CFTypeRef?) -> [(id: CGWindowID, tags: UInt64, parent: CGWindowID)] {
+        guard let query, let windowQueryResultCopyWindows, let windowIteratorAdvance, let windowIteratorGetTags,
+              let windowIteratorGetWindowID,
               let iterator = windowQueryResultCopyWindows(query)?.takeRetainedValue()
         else { return [] }
-        var result: [(id: CGWindowID, tags: UInt64)] = []
+        var result: [(id: CGWindowID, tags: UInt64, parent: CGWindowID)] = []
         while windowIteratorAdvance(iterator) {
-            result.append((windowIteratorGetWindowID(iterator), windowIteratorGetTags(iterator)))
+            // No parent lookup: every window counts as one of its own.
+            result.append((windowIteratorGetWindowID(iterator), windowIteratorGetTags(iterator),
+                           windowIteratorGetParentID?(iterator) ?? 0))
         }
         return result
     }

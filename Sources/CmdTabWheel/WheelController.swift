@@ -25,6 +25,9 @@ final class WheelController {
     /// An app we told to close a window or quit is asking something first ("Save changes?").
     /// The wheel covers that question, so when the wheel closes this app comes to the front.
     private var askingApp: (pid: pid_t, window: CGWindowID?)?
+    /// Apps told to quit that are still running without a window: they're on their way out
+    /// (Stocks takes about 15 seconds), so the wheel leaves them out already.
+    private var quittingApps: Set<pid_t> = []
 
     init() {
         let model = WheelModel(layout: .standard)
@@ -85,8 +88,15 @@ final class WheelController {
             close()
             returnFocusOrShowQuestion()
         case .closeWindow:
-            if let item = model.selectedItem, let window = model.closableWindow(of: item) {
+            guard let item = model.selectedItem else { return }
+            switch model.closeAction(for: item) {
+            case .closeWindow(let window):
                 closeWindow(window, of: item)
+            case .quitApp:
+                log.notice("⌘W on \(item.name, privacy: .public), which has no window")
+                quit(item)
+            case nil:
+                break
             }
         case .quitApp:
             if let item = model.selectedItem {
@@ -99,15 +109,18 @@ final class WheelController {
     /// The app's last window is the same as ⌘Q: closing the only window means "done with it".
     private func closeWindow(_ window: AppWindow, of item: WheelItem) {
         log.notice("closing a window of \(item.name, privacy: .public)")
-        model.removeWindow(window.id, of: item.pid)
+        model.beginClosingWindow(window.id, of: item.pid)
         updateLivePreview()
         let pid = item.pid
         let name = item.name
         // Finder can't quit — it just stays without windows.
-        let mayQuit = item.app.bundleIdentifier != "com.apple.finder"
+        let mayQuit = item.canQuit
         let windowID = window.id
         // Accessibility and the window checks talk to other processes: off the main thread.
         Task.detached(priority: .userInitiated) { [weak self] in
+            defer {
+                Task { @MainActor [weak self] in self?.model.finishClosingWindow(windowID) }
+            }
             // Quit straight away, without closing the window first: that doesn't depend on the
             // app reacting to its close button (a busy one times out, Stickies ignores it).
             if mayQuit, !WindowList.hasOtherWindows(of: pid, besides: windowID) {
@@ -164,23 +177,55 @@ final class WheelController {
     /// ⌘Q, like in the system switcher. The app may ask about unsaved documents first, so its
     /// sector goes only once it has actually quit (the termination observer in `init`).
     private func quit(_ item: WheelItem) {
-        // Finder ignores quit requests (unless a hidden setting allows it); don't pretend.
-        guard item.app.bundleIdentifier != "com.apple.finder" else { return }
+        // Finder ignores quit requests; don't pretend.
+        guard item.canQuit else { return }
         log.notice("quitting \(item.name, privacy: .public)")
         model.noteQuitRequested()
         let pid = item.pid
         Task { await terminate(pid) } // after the event tap callback returns
     }
 
-    /// Asks the app to quit. Still running a second later: it's asking about unsaved documents.
+    /// Asks the app to quit. Still running a second later with a new window: it's asking about
+    /// unsaved documents. Still running without one: it's just slow to quit (Stocks can take
+    /// 15 seconds), so it leaves the wheel already.
+    /// Its sector goes once it has quit. NSWorkspace doesn't say so for every app (never for
+    /// Stocks), so the app itself is watched too.
     private func terminate(_ pid: pid_t) async {
         guard let app = NSRunningApplication(processIdentifier: pid) else { return }
+        let name = app.localizedName ?? "pid \(pid)"
+        let windowsBefore = WindowList.onScreenWindowIDs(of: pid)
+        model.setQuitting(pid, true)
         app.terminate()
         try? await Task.sleep(for: .seconds(1))
-        if !app.isTerminated { appIsAsking(pid: pid, window: nil) }
+        if !app.isTerminated {
+            // A question ("Save changes?") is a new window: a sheet or an alert.
+            if !WindowList.onScreenWindowIDs(of: pid).subtracting(windowsBefore).isEmpty {
+                model.setQuitting(pid, false) // it waits for the user now
+                appIsAsking(pid: pid, window: nil)
+            } else if WindowList.windowsByApp(of: [pid])[pid]?.isEmpty ?? true {
+                log.notice("\(name, privacy: .public) is slow to quit: off the wheel already")
+                quittingApps.insert(pid)
+                if isOpen {
+                    model.removeApp(pid)
+                    updateLivePreview()
+                }
+            }
+        }
+        // Watch for a minute. A slow one that doesn't quit after all comes back on the wheel.
+        for _ in 0..<60 where !app.isTerminated {
+            try? await Task.sleep(for: .seconds(1))
+        }
+        quittingApps.remove(pid)
+        if app.isTerminated {
+            appTerminated(pid)
+        } else {
+            model.setQuitting(pid, false)
+        }
     }
 
     private func appTerminated(_ pid: pid_t) {
+        quittingApps.remove(pid)
+        model.setQuitting(pid, false)
         guard isOpen else { return }
         model.removeApp(pid)
         updateLivePreview()
@@ -198,7 +243,13 @@ final class WheelController {
         askingApp = nil
         frontAppAtOpen = NSWorkspace.shared.frontmostApplication?.processIdentifier
         window.cover(screen)                  // pointer math below needs the final position
-        model.reload(pointer: cursorFromWheelCenter(), quickSwitchTo: history.previous)
+        let previous = history.previous(excluding: quittingApps)
+        model.reload(pointer: cursorFromWheelCenter(), quickSwitchTo: previous,
+                     window: previous.flatMap { history.lastWindow(of: $0) }, leaving: quittingApps)
+        // The window the user is leaving: the front app's frontmost one (on-screen ones come first).
+        if let front = frontAppAtOpen, let window = model.windows[front]?.first, window.place == .here {
+            history.noteWindow(window.id, of: front)
+        }
         window.show()
         NSCursor.arrow.set()                  // replace whatever the app below had (e.g. I-beam)
         mouseTap.enable()
@@ -243,6 +294,7 @@ final class WheelController {
     private func clicked(at mouse: NSPoint) {
         guard isOpen else { return }
         let point = cursorFromWheelCenter(mouse)
+        if model.isBusyActionRail(at: point) { return }
         if let (item, window) = model.closeTarget(at: point) {
             closeWindow(window, of: item)
             return
@@ -259,6 +311,7 @@ final class WheelController {
     /// until it returns. Talking to WindowServer from in here can stall it — so do it right after.
     private func activateSoon(_ pid: pid_t?, window: CGWindowID? = nil, opensWindowIfNone: Bool = true) {
         guard let pid else { return }
+        if let window { history.noteWindow(window, of: pid) }
         Task { AppActivator.activate(pid: pid, windowID: window, opensWindowIfNone: opensWindowIfNone) }
     }
 

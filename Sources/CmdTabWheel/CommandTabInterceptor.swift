@@ -14,7 +14,7 @@ enum WheelInput: Equatable {
     case step(backward: Bool)    // Tab / ⇧Tab again while ⌘ is still held
     case commit                  // ⌘ released
     case cancel                  // Esc
-    case closeWindow             // ⌘W: close the selected window
+    case closeWindow             // ⌘W: close the selected window (quit an app with none)
     case quitApp                 // ⌘Q: quit the selected app
 }
 

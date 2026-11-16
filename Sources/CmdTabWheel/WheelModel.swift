@@ -12,6 +12,12 @@ struct WheelItem: Identifiable {
     let name: String
     let icon: NSImage
     let app: NSRunningApplication
+    /// Hidden (⌘H): it has windows, just out of sight and not on the wheel.
+    var isHidden = false
+    /// Finder can't quit (unless a hidden setting allows it).
+    var canQuit = true
+    /// The program that started this copy of the app, when it wasn't the user ("chrome-devtools-mcp").
+    var launchedBy: String?
     /// The window this sector stands for. nil = the app as a whole (one window or none).
     var window: AppWindow?
     /// "2" on the icon of the app's second window; nil for one-window apps.
@@ -27,7 +33,10 @@ extension WheelItem {
             pid: app.processIdentifier,
             name: app.localizedName ?? app.bundleIdentifier ?? "?",
             icon: app.icon ?? NSImage(),
-            app: app
+            app: app,
+            isHidden: app.isHidden,
+            canQuit: app.bundleIdentifier != "com.apple.finder",
+            launchedBy: AppLauncher.name(ofParentOf: app.processIdentifier)
         )
     }
 }
@@ -63,6 +72,8 @@ final class WheelModel {
 
     /// The previously used app. A quick ⌘Tab — released without touching anything — goes there.
     private(set) var quickSwitchPID: pid_t?
+    /// The window of that app the user was last in, if known.
+    private(set) var quickSwitchWindowID: CGWindowID?
     /// The user did something this time: moved the mouse past the threshold or pressed Tab.
     /// After that, releasing ⌘ with nothing selected means "cancel", not "quick switch".
     private(set) var wasTouched = false
@@ -74,9 +85,12 @@ final class WheelModel {
 
     var quickSwitchItem: WheelItem? {
         guard !wasTouched, let quickSwitchPID else { return nil }
-        // An app with several windows: the sector of the window it was left on, its front one.
-        let front = windows[quickSwitchPID]?.first?.id
-        return items.first { $0.pid == quickSwitchPID && ($0.window == nil || $0.window?.id == front) }
+        // An app with several windows: the sector of the window the user left it from, if it's
+        // still there. Else its front one — which may be another window: the one left can be
+        // behind a full-screen app while another one shows on a second display.
+        let appWindows = windows[quickSwitchPID] ?? []
+        let window = appWindows.first { $0.id == quickSwitchWindowID }?.id ?? appWindows.first?.id
+        return items.first { $0.pid == quickSwitchPID && ($0.window == nil || $0.window?.id == window) }
     }
 
     // Pointer bookkeeping isn't drawn, so it's not observed (no re-render per mouse move).
@@ -92,24 +106,30 @@ final class WheelModel {
 
     /// Regular apps (the ones with a Dock icon), in launch order — stable slots for muscle memory.
     /// Sorted explicitly: Apple documents the order of `runningApplications` as unspecified.
-    func reload(pointer: CGPoint, quickSwitchTo quickSwitchPID: pid_t?) {
+    /// `leaving`: apps on their way out that are still running.
+    func reload(pointer: CGPoint, quickSwitchTo quickSwitchPID: pid_t?, window quickSwitchWindowID: CGWindowID?,
+                leaving: Set<pid_t> = []) {
         let apps = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular }
+            .filter { $0.activationPolicy == .regular && !leaving.contains($0.processIdentifier) }
             .map { (app: $0, started: $0.startDate) } // look the date up once, not per comparison
             .sorted { ($0.started, $0.app.processIdentifier) < ($1.started, $1.app.processIdentifier) }
             .map { WheelItem(app: $0.app) }
         let windows = WindowList.windowsByApp(of: Set(apps.map(\.pid)))
-        load(apps: apps, windows: windows, pointer: pointer, quickSwitchTo: quickSwitchPID)
+        load(apps: apps, windows: windows, pointer: pointer, quickSwitchTo: quickSwitchPID, window: quickSwitchWindowID)
     }
 
     /// `reload` once the running apps (in slot order) and their windows are known.
     /// Tests start here.
-    func load(apps: [WheelItem], windows: [pid_t: [AppWindow]], pointer: CGPoint, quickSwitchTo quickSwitchPID: pid_t?) {
+    func load(apps: [WheelItem], windows: [pid_t: [AppWindow]], pointer: CGPoint,
+              quickSwitchTo quickSwitchPID: pid_t?, window quickSwitchWindowID: CGWindowID? = nil) {
         self.quickSwitchPID = quickSwitchPID
+        self.quickSwitchWindowID = quickSwitchWindowID
         wasTouched = false
         hasClosedSomething = false
         let running = Set(apps.map(\.pid))
         self.windows = windows.filter { running.contains($0.key) }
+        quittingPIDs.formIntersection(running)
+        closingWindows = closingWindows.filter { running.contains($0.value) }
         items = sectors(for: apps)
         select(nil)
         // Drop screenshots of windows that are gone and apps that have quit.
@@ -140,6 +160,19 @@ final class WheelModel {
         }
     }
 
+    /// Show activity before removing the window or doing any asynchronous checks.
+    func beginClosingWindow(_ id: CGWindowID, of pid: pid_t) {
+        closingWindows[id] = pid
+        removeWindow(id, of: pid)
+    }
+
+    func finishClosingWindow(_ id: CGWindowID) {
+        closingWindows[id] = nil
+    }
+
+    /// Window close requests not yet handed over to quitting or finished.
+    private var closingWindows: [CGWindowID: pid_t] = [:]
+
     /// A window was closed from the wheel: take it off right away instead of waiting for the app.
     /// (If the app keeps it open after all, say to ask about unsaved changes, it's back next time.)
     func removeWindow(_ id: CGWindowID, of pid: pid_t) {
@@ -150,6 +183,19 @@ final class WheelModel {
         rebuildSectors()
     }
 
+    /// Apps told to quit that haven't yet: their icons show it. Kept across openings until
+    /// the app has quit or turned out to stay.
+    private(set) var quittingPIDs: Set<pid_t> = []
+
+    func setQuitting(_ pid: pid_t, _ isQuitting: Bool) {
+        if isQuitting {
+            quittingPIDs.insert(pid)
+            closingWindows = closingWindows.filter { $0.value != pid }
+        } else {
+            quittingPIDs.remove(pid)
+        }
+    }
+
     /// ⌘Q was sent. The sectors go only once the app has quit (`removeApp`).
     func noteQuitRequested() {
         touch()
@@ -158,6 +204,8 @@ final class WheelModel {
 
     /// An app quit while the wheel is open (⌘Q here, or on its own): its sectors go.
     func removeApp(_ pid: pid_t) {
+        quittingPIDs.remove(pid)
+        closingWindows = closingWindows.filter { $0.value != pid }
         guard items.contains(where: { $0.pid == pid }) else { return }
         let gone = Set((windows[pid] ?? []).map(\.id))
         windows[pid] = nil
@@ -191,6 +239,18 @@ final class WheelModel {
         items = sectors(for: apps)
 
         if isPointerActive {
+            // Removing the last window must not lose a busy rail under the cursor, even
+            // when its end lies across the neighboring sector's angular boundary.
+            let owner = previous.flatMap { previous -> Int? in
+                if previous.index < items.count, items[previous.index].pid == previous.pid {
+                    return previous.index
+                }
+                return items.firstIndex { $0.pid == previous.pid }
+            }
+            if let owner, isActionRailBusy(for: items[owner]),
+               layout.actionRailContains(lastPointer, index: owner, count: items.count) {
+                select(owner)
+            }
             movePointer(to: lastPointer)
             return
         }
@@ -221,6 +281,35 @@ final class WheelModel {
         guard let window = chosenWindow(of: item) else { return nil }
         if case .otherDesktop = window.place { return nil }
         return window
+    }
+
+    /// Keep the rail throughout the close request, including the handoff to quitting.
+    func showsActionRail(for item: WheelItem) -> Bool {
+        isActionRailBusy(for: item) || closableWindow(of: item) != nil
+    }
+
+    func isActionRailBusy(for item: WheelItem) -> Bool {
+        if quittingPIDs.contains(item.pid) { return true }
+        if let window = chosenWindow(of: item) { return closingWindows[window.id] == item.pid }
+        return closingWindows.values.contains(item.pid)
+    }
+
+    /// What ⌘W does with a sector.
+    enum CloseAction: Equatable {
+        /// Close the window (the app's last one quits the app, see the controller).
+        case closeWindow(AppWindow)
+        /// The app has no window at all: quit it, like ⌘Q. The wheel doesn't show whether an
+        /// app has a window, so ⌘W must not depend on it.
+        case quitApp
+    }
+
+    /// nil: nothing to do. A window on another desktop can't be closed, and quitting would take
+    /// it along unseen. A hidden app has windows too, just out of sight. Finder doesn't quit.
+    func closeAction(for item: WheelItem) -> CloseAction? {
+        guard !isActionRailBusy(for: item) else { return nil }
+        if let window = closableWindow(of: item) { return .closeWindow(window) }
+        guard chosenWindow(of: item) == nil, !item.isHidden, item.canQuit else { return nil }
+        return .quitApp
     }
 
     /// "Window 2 of 3" for the hub — only for apps with more than one window.
@@ -258,7 +347,7 @@ final class WheelModel {
         updateSelectionReach(distance: distance)
         // Keep the visible rail attached to its owner while aiming at its actions,
         // including the short path from the icon. This matters with tightly packed sectors.
-        if let index = selectedIndex, closableWindow(of: items[index]) != nil,
+        if let index = selectedIndex, showsActionRail(for: items[index]),
            layout.actionRailContains(point, index: index, count: items.count) {
             return
         }
@@ -279,7 +368,7 @@ final class WheelModel {
     func item(at point: CGPoint) -> WheelItem? {
         let distance = hypot(point.x, point.y)
         guard !items.isEmpty, distance >= layout.innerRadius else { return nil }
-        if let index = selectedIndex, closableWindow(of: items[index]) != nil,
+        if let index = selectedIndex, showsActionRail(for: items[index]),
            layout.actionRailContains(point, index: index, count: items.count) {
             return items[index]
         }
@@ -289,10 +378,17 @@ final class WheelModel {
 
     /// Only the action on the visible rail is clickable; hidden sectors have no close target.
     func closeTarget(at point: CGPoint) -> (item: WheelItem, window: AppWindow)? {
-        guard let index = selectedIndex, let window = closableWindow(of: items[index]) else { return nil }
+        guard let index = selectedIndex, !isActionRailBusy(for: items[index]),
+              let window = closableWindow(of: items[index]) else { return nil }
         let center = layout.closeButtonCenter(index: index, count: items.count)
         guard hypot(point.x - center.x, point.y - center.y) <= WheelLayout.closeButtonHitRadius else { return nil }
         return (items[index], window)
+    }
+
+    /// A progress rail is feedback, not a close button or a shortcut into the quitting app.
+    func isBusyActionRail(at point: CGPoint) -> Bool {
+        guard let index = selectedIndex, isActionRailBusy(for: items[index]) else { return false }
+        return layout.actionRailContains(point, index: index, count: items.count)
     }
 
     // MARK: Close button hover

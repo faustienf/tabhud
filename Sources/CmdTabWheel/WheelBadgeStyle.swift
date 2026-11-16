@@ -6,7 +6,7 @@ struct WheelBadgeStyle: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .font(.system(size: 12, weight: .medium))
+            .font(.system(size: 12, weight: .medium, design: .monospaced))
             .foregroundStyle(WheelPalette(isDark: colorScheme == .dark).ink.opacity(0.9))
             .padding(.horizontal, 12)
             .padding(.vertical, 5)

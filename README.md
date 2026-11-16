@@ -42,7 +42,7 @@ To update, `git pull` and run `scripts/setup.sh` again: it quits the running cop
 | ⌘Tab | Open the wheel |
 | Pointer, Tab, ⇧Tab | Select |
 | Release ⌘, or click | Switch |
-| ⌘W, or × on the selected sector’s outer rail | Close the selected window; the app's last one quits the app |
+| ⌘W, or × on the selected sector’s outer rail | Close the selected window; the app's last one quits the app, and so does ⌘W on an app with no windows |
 | ⌘Q | Quit the selected app |
 | Esc | Cancel |
 

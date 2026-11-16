@@ -16,7 +16,7 @@ final class WheelWindow: NSPanel {
     private var wheelView: NSView?
 
     /// `size`: the square the wheel view draws on — the wheel plus room around it.
-    convenience init(size: CGFloat, content: some View) {
+    convenience init(size: CGFloat, glassDiameter: CGFloat = WheelLayout.standard.diameter, content: some View) {
         self.init(
             contentRect: NSRect(x: 0, y: 0, width: size, height: size),
             styleMask: [.borderless, .nonactivatingPanel], // no frame; key without activating us
@@ -41,7 +41,7 @@ final class WheelWindow: NSPanel {
         ]
 
         let backdrop = BackdropView(frame: NSRect(x: 0, y: 0, width: size, height: size))
-        let wheel = Self.makeWheelView(size: size, content: content)
+        let wheel = Self.makeWheelView(size: size, glassDiameter: glassDiameter, content: content)
         backdrop.addSubview(wheel)
         contentView = backdrop
         wheelView = wheel
@@ -95,12 +95,19 @@ final class WheelWindow: NSPanel {
     }
 
     /// Hosts the circular glass surface and wheel content inside the transparent panel.
-    private static func makeWheelView(size: CGFloat, content: some View) -> NSView {
+    private static func makeWheelView(size: CGFloat, glassDiameter: CGFloat, content: some View) -> NSView {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: size, height: size))
+        let glass = WheelGlassMaterialView(frame: NSRect(
+            x: (size - glassDiameter) / 2, y: (size - glassDiameter) / 2,
+            width: glassDiameter, height: glassDiameter
+        ))
+        container.addSubview(glass)
         let hosting = NSHostingView(rootView: content)
         hosting.sizingOptions = []
         hosting.frame = NSRect(x: 0, y: 0, width: size, height: size)
         hosting.autoresizingMask = [] // stay compact inside the full-screen panel
-        return hosting
+        container.addSubview(hosting)
+        return container
     }
 }
 

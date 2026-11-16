@@ -26,12 +26,10 @@ struct WheelView: View {
 
     var body: some View {
         wheelContent
-            .background(.ultraThinMaterial, in: Circle())
     }
 
     private var wheelContent: some View {
         ZStack {
-            surface
             sectors
                 .animation(selectionAnimation, value: model.selectedIndex)
                 .animation(.easeOut(duration: 0.07), value: model.selectionReach)
@@ -42,17 +40,14 @@ struct WheelView: View {
                 .animation(.easeOut(duration: 0.07), value: model.selectionReach)
         }
         .frame(width: model.layout.diameter, height: model.layout.diameter)
+        .backgroundPreferenceValue(WheelCaptionBounds.self) { anchors in
+            GeometryReader { geometry in
+                WheelInstrumentSurface(palette: palette, captionRects: anchors.map { geometry[$0] })
+            }
+        }
     }
 
-    // MARK: - Glass surface
-
-    private var surface: some View {
-        Circle()
-            .fill(palette.surfaceTint)
-            .overlay(Circle().strokeBorder(palette.border, lineWidth: 0.75))
-    }
-
-    /// A soft selection field that gains contrast and coral color as the pointer travels outward.
+    /// A soft selection field that gains contrast and green light as the pointer travels outward.
     private var sectors: some View {
         let count = model.items.count
         let fill = palette.selectionFill(reach: model.selectionReach)
@@ -77,10 +72,21 @@ struct WheelView: View {
                     .blur(radius: 10)
                     .clipShape(Circle().inset(by: 6))
                     .opacity(isSelected ? 1 : 0)
+                    .animation(.easeOut(duration: reduceMotion ? 0.06 : (isSelected ? 0.045 : 0.15)),
+                               value: isSelected)
+
+                SelectionRim(index: index, count: count, radius: outerRadius - 3)
+                    .stroke(accent.opacity(palette.isDark ? 0.32 : 0.16),
+                            style: StrokeStyle(lineWidth: 5 + 4 * model.selectionReach, lineCap: .round))
+                    .blur(radius: 5)
+                    .opacity(isSelected ? 1 : 0)
+                    .animation(.easeOut(duration: reduceMotion ? 0.06 : (isSelected ? 0.045 : 0.15)),
+                               value: isSelected)
 
                 SelectionRim(index: index, count: count, radius: outerRadius - 1)
                     .stroke(accent.opacity(0.98), style: StrokeStyle(lineWidth: rimWidth, lineCap: .round))
-                    .opacity(isSelected && model.closableWindow(of: model.items[index]) == nil ? 1 : 0)
+                    .shadow(color: accent.opacity(0.28), radius: 3)
+                    .opacity(isSelected && !model.showsActionRail(for: model.items[index]) ? 1 : 0)
             }
         }
     }
@@ -88,7 +94,7 @@ struct WheelView: View {
     /// A slim rail replaces the selected rim. The close action sits off the radial path.
     @ViewBuilder
     private var actionRail: some View {
-        if let index = model.selectedIndex, model.closableWindow(of: model.items[index]) != nil {
+        if let index = model.selectedIndex, model.showsActionRail(for: model.items[index]) {
             let count = model.items.count
             let center = model.layout.closeButtonCenter(index: index, count: count)
             let railAngle = model.layout.actionRailAngle(index: index, count: count)
@@ -100,12 +106,16 @@ struct WheelView: View {
                 ActionRailArc(angle: railAngle, radius: model.layout.actionRailRadius,
                               start: -WheelLayout.actionRailHalfAngle, end: WheelLayout.actionRailHalfAngle)
                     .stroke(palette.actionRailSurface, style: StrokeStyle(lineWidth: 12.25, lineCap: .round))
-                ActionRailArc(angle: railAngle, radius: model.layout.actionRailRadius,
-                              start: direction > 0 ? -0.065 : 0.005,
-                              end: direction > 0 ? -0.005 : 0.065)
-                    .stroke(accent, style: StrokeStyle(lineWidth: 1.3 + 4.2 * model.selectionReach, lineCap: .round))
-                CloseButton(size: WheelLayout.closeButtonSize, isHovered: model.isCloseButtonHovered)
-                    .offset(x: center.x, y: center.y)
+                if model.isActionRailBusy(for: model.items[index]) {
+                    QuittingRailProgress(angle: railAngle, radius: model.layout.actionRailRadius)
+                } else {
+                    ActionRailArc(angle: railAngle, radius: model.layout.actionRailRadius,
+                                  start: direction > 0 ? -0.065 : 0.005,
+                                  end: direction > 0 ? -0.005 : 0.065)
+                        .stroke(accent, style: StrokeStyle(lineWidth: 1.3 + 4.2 * model.selectionReach, lineCap: .round))
+                    CloseButton(size: WheelLayout.closeButtonSize, isHovered: model.isCloseButtonHovered)
+                        .offset(x: center.x, y: center.y)
+                }
             }
             .id(index)
             .transition(.opacity)
@@ -131,18 +141,25 @@ struct WheelView: View {
             CenteredWheelPreview {
                 HubPicture(model: model, item: item, palette: palette)
             } header: {
-                if isQuickSwitchPreview {
-                    QuickSwitchBadge()
-                } else if let window = model.chosenWindow(of: item),
-                          model.windowPosition(of: item) != nil || window.place != .here {
-                    WindowCounterBadge(position: model.windowPosition(of: item), place: window.place.label,
-                                       title: window.title)
-                        .frame(width: model.layout.previewSize.width)
+                VStack(spacing: 0) {
+                    if let launcher = item.launchedBy {
+                        LauncherBadge(name: launcher)
+                            .frame(maxWidth: model.layout.previewSize.width)
+                    }
+                    if isQuickSwitchPreview {
+                        QuickSwitchBadge()
+                    } else if let window = model.chosenWindow(of: item),
+                              model.windowPosition(of: item) != nil || window.place != .here {
+                        WindowCounterBadge(position: model.windowPosition(of: item), place: window.place.label,
+                                           title: window.title)
+                            .frame(width: model.layout.previewSize.width)
+                    }
                 }
+                .anchorPreference(key: WheelCaptionBounds.self, value: .bounds) { [$0] }
             } footer: {
                 VStack(spacing: 5) {
                     Text(item.name)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
                         .tracking(-0.15)
                         .foregroundStyle(palette.ink)
                         .lineLimit(1)
@@ -152,9 +169,17 @@ struct WheelView: View {
                         Rectangle()
                             .fill(palette.separator)
                             .frame(width: model.layout.previewSize.width * 0.55, height: 0.5)
-                        releaseHint
+                        if model.quittingPIDs.contains(item.pid) {
+                            Label("Quitting…", systemImage: "power")
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .foregroundStyle(accent)
+                                .frame(height: 20)
+                        } else {
+                            releaseHint
+                        }
                     }
                 }
+                .anchorPreference(key: WheelCaptionBounds.self, value: .bounds) { [$0] }
             }
         } else {
             VStack(spacing: 10) {
@@ -168,12 +193,13 @@ struct WheelView: View {
                     }
                 VStack(spacing: 5) {
                     Text("Choose an app")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
                         .foregroundStyle(palette.ink.opacity(0.9))
                     Text("Move the pointer or press Tab")
-                        .font(.system(size: 11))
+                        .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(palette.secondaryInk)
                 }
+                .anchorPreference(key: WheelCaptionBounds.self, value: .bounds) { [$0] }
             }
         }
     }
@@ -184,7 +210,7 @@ struct WheelView: View {
             CommandKeycap(size: CGSize(width: 24, height: 20), symbolSize: 11.5)
             Text("to switch")
         }
-        .font(.system(size: 12, weight: .regular))
+        .font(.system(size: 11, weight: .regular, design: .monospaced))
         .foregroundStyle(palette.secondaryInk)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Release Command to switch")
@@ -198,29 +224,39 @@ struct WheelView: View {
         return ZStack {
             ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
                 let isSelected = index == model.selectedIndex
+                let isQuitting = model.quittingPIDs.contains(item.pid)
                 let angle = WheelGeometry.angle(of: index, count: count)
                 Image(nsImage: item.icon)
                     .resizable()
                     .interpolation(.high)
                     .frame(width: size, height: size)
                     .shadow(color: .black.opacity(isSelected ? palette.previewShadow : palette.previewShadow / 2), radius: isSelected ? 4 : 2, y: 2)
-                    .overlay(alignment: .bottom) {
-                        WindowPositionIndicator(number: item.windowNumber, count: model.windows[item.pid]?.count ?? 0,
-                                                maxWidth: size, tint: accent, isSelected: isSelected)
-                            .padding(.top, 4)
-                            .alignmentGuide(.bottom) { $0[.top] }
+                    .overlay(alignment: .topTrailing) {
+                        if item.launchedBy != nil {
+                            LauncherMark(size: max(12, min(17, size * 0.29)))
+                                .offset(x: size * 0.035, y: -size * 0.035)
+                        }
                     }
+                    .modifier(QuittingAppAppearance(isQuitting: isQuitting))
+                    .overlay(alignment: .bottom) {
+                        if !isQuitting {
+                            WindowPositionIndicator(number: item.windowNumber, count: model.windows[item.pid]?.count ?? 0,
+                                                    maxWidth: size, tint: accent, isSelected: isSelected)
+                                .padding(.top, 4)
+                                .alignmentGuide(.bottom) { $0[.top] }
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.12), value: isQuitting)
                     .scaleEffect(isSelected && !reduceMotion ? 1.045 : 1)
                     .offset(x: iconRadius * cos(angle), y: iconRadius * sin(angle))
-                    .accessibilityLabel(item.name)
+                    .accessibilityLabel([item.name, item.launchedBy.map { "started by \($0)" },
+                                         isQuitting ? "quitting" : nil].compactMap { $0 }.joined(separator: ", "))
                     .accessibilityAddTraits(isSelected ? [.isSelected] : [])
             }
         }
     }
 }
 
-/// An action embedded in the selected sector’s rail, outside the app icon.
-/// Clicks never reach SwiftUI here (WheelWindow takes them all) — WheelModel hit-tests it.
 /// The hub's picture: a window preview, or the app icon until there is one. A view of its own so
 /// a new picture (15 a second with Live Preview) redraws only this, not the whole wheel.
 /// Fixed dimensions keep the title still while a screenshot is loading.
@@ -239,8 +275,17 @@ private struct HubPicture: View {
                     .aspectRatio(contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(palette.border, lineWidth: 0.75)
+                        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        ZStack {
+                            shape.strokeBorder(.black.opacity(palette.isDark ? 0.3 : 0.16), lineWidth: 3)
+                                .blur(radius: 1.5)
+                                .clipShape(shape)
+                            shape.strokeBorder(LinearGradient(
+                                colors: [palette.accent.opacity(0.34), palette.ink.opacity(0.12),
+                                         palette.accent.opacity(0.18)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            ), lineWidth: 0.75)
+                        }
                     }
                     .shadow(color: .black.opacity(palette.previewShadow), radius: 6, y: 3)
                     .padding(2)
@@ -252,6 +297,7 @@ private struct HubPicture: View {
                     .resizable()
                     .interpolation(.high)
                     .frame(width: 60, height: 60)
+                    .modifier(QuittingAppAppearance(isQuitting: model.quittingPIDs.contains(item.pid)))
                     .shadow(color: .black.opacity(palette.previewShadow), radius: 6, y: 3)
             }
         }
@@ -260,6 +306,17 @@ private struct HubPicture: View {
     }
 }
 
+/// Resolve caption positions in the wheel's background without changing their layout.
+private struct WheelCaptionBounds: PreferenceKey {
+    static var defaultValue: [Anchor<CGRect>] { [] }
+
+    static func reduce(value: inout [Anchor<CGRect>], nextValue: () -> [Anchor<CGRect>]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+/// An action embedded in the selected sector’s rail, outside the app icon.
+/// Clicks never reach SwiftUI here (WheelWindow takes them all) — WheelModel hit-tests it.
 private struct CloseButton: View {
     let size: CGFloat
     let isHovered: Bool
@@ -286,7 +343,7 @@ private struct HubIdentity: Hashable {
     let isQuickSwitch: Bool
 }
 
-/// The empty state can use a coral accent; shortcut captions retain a quiet key outline.
+/// The empty state echoes a display key; shortcut captions retain a quiet key outline.
 private struct CommandKeycap: View {
     let size: CGSize
     let symbolSize: CGFloat
@@ -295,15 +352,16 @@ private struct CommandKeycap: View {
 
     var body: some View {
         let isDark = colorScheme == .dark
-        let shape = RoundedRectangle(cornerRadius: size.height * 0.24, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: size.height * (isAccented ? 0.16 : 0.24), style: .continuous)
         let palette = WheelPalette(isDark: isDark)
         let tint = isAccented ? palette.accent : palette.ink
         return Image(systemName: "command")
             .font(.system(size: symbolSize, weight: .medium))
             .foregroundStyle(isAccented ? palette.accent.opacity(0.9) : palette.secondaryInk)
             .frame(width: size.width, height: size.height)
-            .background(shape.fill(tint.opacity(isAccented ? (isDark ? 0.09 : 0.055) : (isDark ? 0.06 : 0.035))))
-            .overlay(shape.strokeBorder(isAccented ? palette.accent.opacity(0.2) : palette.border, lineWidth: 0.65))
+            .background(shape.fill(isAccented ? palette.actionRailSurface : tint.opacity(isDark ? 0.06 : 0.035)))
+            .overlay(shape.strokeBorder(isAccented ? palette.accent.opacity(0.28) : palette.border, lineWidth: 0.65))
+            .shadow(color: isAccented ? palette.accent.opacity(isDark ? 0.09 : 0.04) : .clear, radius: 12)
     }
 }
 
@@ -330,7 +388,7 @@ private struct SectorShape: Shape {
     }
 }
 
-private struct ActionRailArc: Shape {
+struct ActionRailArc: Shape {
     let angle: Double
     let radius: CGFloat
     let start: Double
@@ -362,7 +420,7 @@ private struct SelectionRim: Shape {
 struct WheelView_Previews: PreviewProvider {
     static var previews: some View {
         let model = WheelModel(layout: .standard)
-        model.reload(pointer: .zero, quickSwitchTo: nil)
+        model.reload(pointer: .zero, quickSwitchTo: nil, window: nil)
         model.step(backward: false)
         return ForEach([ColorScheme.light, .dark], id: \.self) { scheme in
             WheelView(model: model)

@@ -1,4 +1,5 @@
 import ApplicationServices
+import Foundation
 
 /// Another app's window, found through Accessibility by its WindowServer ID.
 ///
@@ -24,6 +25,36 @@ enum AXWindow {
             log.error("AX: window \(windowID, privacy: .public) not found in pid \(pid, privacy: .public)")
         }
         return window
+    }
+
+    private typealias CreateWithRemoteToken = @convention(c) (CFData) -> Unmanaged<AXUIElement>?
+    private static let createWithRemoteToken: CreateWithRemoteToken? = {
+        let rtldDefault = UnsafeMutableRawPointer(bitPattern: -2)
+        guard let pointer = dlsym(rtldDefault, "_AXUIElementCreateWithRemoteToken") else { return nil }
+        return unsafeBitCast(pointer, to: CreateWithRemoteToken.self)
+    }()
+
+    /// Also a window on another desktop or in full screen, which `find` can't see: elements
+    /// made up from the app's pid and a running element number, tried one by one until one is
+    /// the window (AltTab's way). Gives up after `budget`.
+    static func findOnAnyDesktop(pid: pid_t, windowID: CGWindowID,
+                                 budget: Duration = .milliseconds(300)) -> AXUIElement? {
+        if let window = find(pid: pid, windowID: windowID, expected: false) { return window }
+        guard let createWithRemoteToken else { return nil }
+        let deadline = ContinuousClock.now + budget
+        // pid, 0, "coco", element number
+        var token = Data(count: 20)
+        withUnsafeBytes(of: pid) { token.replaceSubrange(0..<4, with: $0) }
+        withUnsafeBytes(of: Int32(0x636f_636f)) { token.replaceSubrange(8..<12, with: $0) }
+        for number: UInt64 in 0..<1000 {
+            withUnsafeBytes(of: number) { token.replaceSubrange(12..<20, with: $0) }
+            guard let element = createWithRemoteToken(token as CFData)?.takeRetainedValue() else { continue }
+            AXUIElementSetMessagingTimeout(element, 0.1)
+            if id(of: element) == windowID { return element }
+            if ContinuousClock.now > deadline { break }
+        }
+        log.error("AX: window \(windowID, privacy: .public) of pid \(pid, privacy: .public) not found on any desktop")
+        return nil
     }
 
     /// Takes the window out of the Dock if it's minimized. True when it was.

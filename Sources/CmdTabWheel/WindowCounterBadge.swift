@@ -7,13 +7,16 @@ struct WindowCounterBadge: View {
     /// "Desktop 2", "Minimized"; nil for a window on screen.
     var place: String?
     var title: String?
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "macwindow.on.rectangle")
+                .foregroundStyle(WheelPalette(isDark: colorScheme == .dark).accent.opacity(0.85))
                 .fixedSize()
             if let position {
                 Text("\(position.index + 1) / \(position.count)")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .monospacedDigit()
                     .fixedSize()
             }

@@ -107,7 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let logItem = NSMenuItem(title: "Save Log…", action: #selector(saveLog), keyEquivalent: "")
         logItem.target = self
         menu.addItem(logItem)
-        let aboutItem = NSMenuItem(title: "About ⌘Tab Wheel", action: #selector(showAbout), keyEquivalent: "")
+        let aboutItem = NSMenuItem(title: "About", action: #selector(showAbout), keyEquivalent: "")
         aboutItem.target = self
         menu.addItem(aboutItem)
         menu.addItem(

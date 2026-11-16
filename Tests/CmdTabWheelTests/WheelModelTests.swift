@@ -227,11 +227,48 @@ struct ClosingTests {
         #expect(!byItself.hasClosedSomething)
     }
 
+    @Test func aQuittingAppIsMarkedUntilItIsGone() {
+        let model = wheel()
+        model.setQuitting(3, true)
+        #expect(model.quittingPIDs == [3])
+        model.removeApp(3)
+        #expect(model.quittingPIDs.isEmpty)
+    }
+
+    @Test func theMarkOutlivesClosingTheWheelButNotTheApp() {
+        let model = wheel()
+        model.setQuitting(3, true)
+        model.setQuitting(4, true)
+        // Opened again: Safari is still quitting, Notes has quit meanwhile.
+        model.load(apps: [F.app(1, "Finder"), F.app(3, "Safari")], windows: [:], pointer: .zero, quickSwitchTo: nil)
+        #expect(model.quittingPIDs == [3])
+        model.setQuitting(3, false) // asked "Save changes?" instead
+        #expect(model.quittingPIDs.isEmpty)
+    }
+
     @Test func resetForgetsAboutIt() {
         let model = wheel()
         model.removeWindow(201, of: 3)
         model.reset()
         #expect(!model.hasClosedSomething)
+    }
+
+    /// The wheel doesn't show whether an app has a window: ⌘W on one without quits it.
+    @Test func commandWClosesTheWindowOrQuitsAnAppWithNone() {
+        let model = wheel()
+        #expect(model.closeAction(for: model.items[1]) == .quitApp) // Terminal
+        #expect(model.closeAction(for: model.items[3]) == .closeWindow(F.window(202)))
+        #expect(model.closeAction(for: model.items[5]) == .closeWindow(F.window(401))) // Notes
+    }
+
+    @Test func butNotAnAppWithWindowsOutOfSightOrOneThatCantQuit() {
+        var finder = F.app(1, "Finder")
+        finder.canQuit = false
+        var hidden = F.app(2, "Telegram")
+        hidden.isHidden = true
+        let model = F.wheel([finder, hidden, F.app(3, "Notes")],
+                            windows: [3: [F.window(301, .otherDesktop("Desktop 2"))]])
+        #expect(model.items.allSatisfy { model.closeAction(for: $0) == nil })
     }
 
     @Test func theCloseButtonIsOnlyOnTheSelectedSector() {
@@ -240,6 +277,108 @@ struct ClosingTests {
         let count = model.items.count
         #expect(model.closeTarget(at: model.layout.closeButtonCenter(index: 3, count: count))?.window.id == 202)
         #expect(model.closeTarget(at: model.layout.closeButtonCenter(index: 4, count: count)) == nil)
+    }
+
+    @Test func theQuittingRailStaysAfterTheLastWindowAndCannotBeClickedAgain() throws {
+        let model = wheel()
+        model.point(at: 5) // Notes, one window
+        model.setQuitting(4, true)
+        model.removeWindow(401, of: 4)
+
+        let item = try #require(model.selectedItem)
+        #expect(item.pid == 4)
+        #expect(model.closableWindow(of: item) == nil)
+        #expect(model.showsActionRail(for: item))
+        let center = model.layout.closeButtonCenter(index: try #require(model.selectedIndex), count: model.items.count)
+        model.movePointer(to: center)
+        #expect(model.selectedItem?.pid == 4)
+        #expect(model.isBusyActionRail(at: center))
+        #expect(model.closeTarget(at: center) == nil)
+        #expect(model.closeAction(for: item) == nil)
+
+        model.setQuitting(4, false)
+        #expect(!model.showsActionRail(for: item))
+        #expect(!model.isBusyActionRail(at: center))
+    }
+
+    @Test func closingTheLastWindowKeepsTheRailBusyBeforeTheQuitCheckReturns() throws {
+        let model = wheel()
+        model.point(at: 5) // Notes
+        let center = model.layout.closeButtonCenter(index: 5, count: model.items.count)
+        model.movePointer(to: center)
+        #expect(model.closeTarget(at: center)?.window.id == 401)
+
+        model.beginClosingWindow(401, of: 4) // synchronous click, before the background check
+        let item = try #require(model.selectedItem)
+        #expect(item.pid == 4)
+        #expect(model.quittingPIDs.isEmpty)
+        #expect(model.chosenWindow(of: item) == nil)
+        #expect(model.showsActionRail(for: item))
+        #expect(model.isActionRailBusy(for: item))
+        #expect(model.isBusyActionRail(at: center))
+        #expect(model.closeAction(for: item) == nil)
+
+        model.setQuitting(4, true) // the check confirmed this was the last window
+        model.finishClosingWindow(401)
+        #expect(model.showsActionRail(for: item))
+        #expect(model.isActionRailBusy(for: item))
+        #expect(model.isBusyActionRail(at: center))
+        model.setQuitting(4, false)
+        #expect(!model.showsActionRail(for: item))
+    }
+
+    @Test func aWindowCloseThatDoesNotQuitTheAppStopsItsPendingRail() throws {
+        let model = wheel()
+        model.point(at: 5)
+        model.beginClosingWindow(401, of: 4)
+        let item = try #require(model.selectedItem)
+        #expect(model.isActionRailBusy(for: item))
+        model.finishClosingWindow(401) // closed, refused, or asked a question instead
+        #expect(!model.isActionRailBusy(for: item))
+        #expect(!model.showsActionRail(for: item))
+    }
+
+    @Test func anInFlightWindowCloseDoesNotBlockClosingTheNextWindowOfThatApp() throws {
+        let model = wheel()
+        for _ in 0..<4 { model.step(backward: false) } // Safari #2
+        model.beginClosingWindow(202, of: 3)
+        let next = try #require(model.selectedItem)
+        #expect(model.chosenWindow(of: next)?.id == 203)
+        #expect(!model.isActionRailBusy(for: next))
+        #expect(model.closeAction(for: next) == .closeWindow(F.window(203)))
+        model.finishClosingWindow(202)
+    }
+
+    @Test func leavingAQuittingSectorDoesNotLeaveItsRailOverAnotherApp() throws {
+        let model = wheel()
+        model.point(at: 5)
+        model.setQuitting(4, true)
+        let center = model.layout.closeButtonCenter(index: 5, count: model.items.count)
+        #expect(model.isBusyActionRail(at: center))
+        #expect(model.closeTarget(at: center) == nil) // even with its window still listed
+
+        model.point(at: 0) // Finder, no closable window
+        #expect(!model.showsActionRail(for: try #require(model.selectedItem)))
+        #expect(!model.isBusyActionRail(at: center))
+        #expect(model.quittingPIDs == [4])
+        model.point(at: 5)
+        #expect(model.showsActionRail(for: try #require(model.selectedItem)))
+        #expect(model.isBusyActionRail(at: center))
+    }
+
+    @Test func aBusyRailKeepsItsOwnerWhenItsEndCrossesIntoANeighboringSector() throws {
+        let model = F.wheel((1...80).map { F.app(pid_t($0), "App \($0)") }, windows: [1: [F.window(101)]])
+        model.point(at: 0)
+        let center = model.layout.closeButtonCenter(index: 0, count: model.items.count)
+        #expect(WheelGeometry.index(at: atan2(center.y, center.x), count: model.items.count) != 0)
+        model.movePointer(to: center)
+        model.beginClosingWindow(101, of: 1)
+        #expect(model.selectedItem?.pid == 1)
+        #expect(model.item(at: center)?.pid == 1)
+        #expect(model.isBusyActionRail(at: center))
+        model.setQuitting(1, true)
+        model.finishClosingWindow(101)
+        #expect(model.isBusyActionRail(at: center))
     }
 }
 
@@ -287,5 +426,16 @@ struct WindowsElsewhereTests {
                             windows: [2: [F.window(201), F.window(205, .otherDesktop("Desktop 2"))]],
                             quickSwitchTo: 2)
         #expect(model.quickSwitchItem?.window?.id == 201)
+    }
+
+    /// Chrome window 205 left for a full-screen app on that display; window 201 shows on the
+    /// other display. Back is 205, the one the user was in.
+    @Test func butGoesBackToTheWindowTheUserLeftWhereverItIs() {
+        let windows: [pid_t: [AppWindow]] = [2: [F.window(201), F.window(205, .otherDesktop("Desktop 1"))]]
+        #expect(F.wheel([F.app(2, "Chrome")], windows: windows, quickSwitchTo: 2, window: 205)
+            .quickSwitchItem?.window?.id == 205)
+        // That window is gone: the front one, then.
+        #expect(F.wheel([F.app(2, "Chrome")], windows: windows, quickSwitchTo: 2, window: 999)
+            .quickSwitchItem?.window?.id == 201)
     }
 }

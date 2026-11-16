@@ -1,25 +1,34 @@
 import AppKit
-import SwiftUI
 
-/// Native desktop blur behind the circular glass surface.
-struct WheelGlass: NSViewRepresentable {
-    func makeNSView(context: Context) -> WheelGlassMaterialView {
-        let view = WheelGlassMaterialView()
-        view.material = .underWindowBackground
-        view.blendingMode = .behindWindow
-        view.state = .active
-        return view
-    }
-
-    func updateNSView(_ view: WheelGlassMaterialView, context: Context) {
-        view.needsLayout = true
-    }
-}
-
+/// A native sibling behind the SwiftUI host, so WindowServer can sample the desktop directly.
 final class WheelGlassMaterialView: NSVisualEffectView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        blendingMode = .behindWindow
+        state = .active
+        appearance = nil // inherit the selected app theme, including Follow System
+        updateMaterial()
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateMaterial()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateMaterial()
+    }
+
+    private func updateMaterial() {
+        material = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .hudWindow : .sidebar
+    }
+
     override func layout() {
         super.layout()
-        guard bounds.width > 0, bounds.height > 0 else { return }
+        guard bounds.width > 0, bounds.height > 0, maskImage?.size != bounds.size else { return }
         maskImage = NSImage(size: bounds.size, flipped: false) { rect in
             NSColor.black.setFill()
             // Keep the blur mask opaque: fading it mixes sharp desktop text back in.

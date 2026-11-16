@@ -5,6 +5,10 @@ import AppKit
 @MainActor
 final class AppHistory {
     private var pids: [pid_t]
+    /// The window the user was last in, per app: the front one when the wheel opened over the
+    /// app, or the one the wheel switched to. Window changes without the wheel aren't seen:
+    /// once the app is behind a full-screen one, its windows can't tell which was in front.
+    private var lastWindows: [pid_t: CGWindowID] = [:]
     private var observers: [NSObjectProtocol] = []
 
     init() {
@@ -21,16 +25,28 @@ final class AppHistory {
             forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main
         ) { [weak self] note in
             guard let pid = Self.pid(from: note) else { return }
-            MainActor.assumeIsolated { self?.pids.removeAll { $0 == pid } }
+            MainActor.assumeIsolated {
+                self?.pids.removeAll { $0 == pid }
+                self?.lastWindows[pid] = nil
+            }
         })
     }
 
-    /// The app used right before the current front one.
-    var previous: pid_t? {
+    /// The app used right before the current front one, leaving out `excluded` ones.
+    func previous(excluding excluded: Set<pid_t> = []) -> pid_t? {
         let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
         return pids.first { pid in
-            pid != front && NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular
+            pid != front && !excluded.contains(pid)
+                && NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular
         }
+    }
+
+    func lastWindow(of pid: pid_t) -> CGWindowID? {
+        lastWindows[pid]
+    }
+
+    func noteWindow(_ id: CGWindowID, of pid: pid_t) {
+        lastWindows[pid] = id
     }
 
     private func moveToFront(_ pid: pid_t) {
