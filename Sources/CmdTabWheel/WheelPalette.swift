@@ -17,12 +17,12 @@ struct WheelPalette {
     }
 
     var surfaceTop: Color {
-        isDark ? Color(red: 0.09, green: 0.12, blue: 0.095).opacity(0.30)
+        isDark ? Color(red: 0.09, green: 0.12, blue: 0.095).opacity(0.34)
                : Color(red: 0.97, green: 0.98, blue: 0.97).opacity(0.22)
     }
 
     var surfaceBottom: Color {
-        isDark ? Color(red: 0.05, green: 0.07, blue: 0.055).opacity(0.42)
+        isDark ? Color(red: 0.05, green: 0.07, blue: 0.055).opacity(0.46)
                : Color(red: 0.90, green: 0.93, blue: 0.91).opacity(0.34)
     }
 

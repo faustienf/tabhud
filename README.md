@@ -7,7 +7,7 @@
 <p align="center">A radial app switcher for macOS: hold ⌘, press Tab, point at an app, let go.</p>
 
 <p align="center">
-  <img src="docs/screenshot.jpg" alt="The wheel open over a macOS desktop: nine apps around a ring, Terminal selected, a preview of its window in the middle">
+  <img src="docs/wheel-preview.png" width="800" alt="The current graphite and green CRT wheel, with Terminal selected and its window preview in the middle">
 </p>
 
 ## Features
