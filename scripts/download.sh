@@ -50,8 +50,13 @@ if pkill -x -U "$(id -u)" "$EXECUTABLE"; then
     pgrep -x -U "$(id -u)" "$EXECUTABLE" >/dev/null || break
     sleep 0.1
   done
-  ! pgrep -x -U "$(id -u)" "$EXECUTABLE" >/dev/null \
-    || fail "⌘Tab Wheel didn't quit: quit it from its menu bar icon, then run this again"
+  # Still running: it hangs, or runs under Xcode's debugger, which swallows SIGTERM.
+  # Force it, and give ⌘Tab back on its behalf.
+  if pgrep -x -U "$(id -u)" "$EXECUTABLE" >/dev/null; then
+    pkill -9 -x -U "$(id -u)" "$EXECUTABLE" || true
+    sleep 0.3
+    "$work/$APP_NAME/Contents/MacOS/$EXECUTABLE" --restore-native-switcher
+  fi
 fi
 
 if [ -e "$dest" ]; then
