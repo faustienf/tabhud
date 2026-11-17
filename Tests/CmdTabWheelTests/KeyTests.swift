@@ -25,7 +25,7 @@ struct LetterTests {
 /// The keyboard side of the wheel: which key events turn into what, and which are swallowed.
 @MainActor
 struct InterceptorTests {
-    private let tab: Int64 = 48, escape: Int64 = 53, w: Int64 = 13, q: Int64 = 12, other: Int64 = 0
+    private let tab: Int64 = 48, escape: Int64 = 53, space: Int64 = 49, w: Int64 = 13, q: Int64 = 12, other: Int64 = 0
 
     private final class Recorder {
         var inputs: [WheelInput] = []
@@ -87,8 +87,18 @@ struct InterceptorTests {
         #expect(recorder.inputs == [.open, .closeWindow])
     }
 
+    @Test func commandSpaceSwitchesToFavoritesOnceAndNeverReachesSpotlight() {
+        let (interceptor, recorder) = makeInterceptor()
+        press(interceptor, tab)
+        #expect(!press(interceptor, space, character: " "))
+        #expect(!press(interceptor, space, character: " ", isRepeat: true))
+        #expect(!press(interceptor, space, up: true, character: " "))
+        #expect(recorder.inputs == [.open, .toggleFavorites])
+    }
+
     @Test func withoutTheWheelEverythingPassesThrough() {
         let (interceptor, recorder) = makeInterceptor()
+        #expect(press(interceptor, space, character: " ")) // Spotlight's
         #expect(press(interceptor, w, character: "w"))
         #expect(press(interceptor, other, [], character: "a"))
         #expect(press(interceptor, escape, []))

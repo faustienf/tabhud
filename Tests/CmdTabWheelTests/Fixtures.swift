@@ -14,9 +14,11 @@ enum Fixture {
     }
 
     static func wheel(_ apps: [WheelItem], windows: [pid_t: [AppWindow]] = [:],
-                      quickSwitchTo previous: pid_t? = nil, window: CGWindowID? = nil) -> WheelModel {
-        let model = WheelModel(layout: .standard)
-        model.load(apps: apps, windows: windows, pointer: .zero, quickSwitchTo: previous, window: window)
+                      quickSwitchTo previous: pid_t? = nil, window: CGWindowID? = nil,
+                      favorites: [CGWindowID: pid_t] = [:], favoritesOnly: Bool = false) -> WheelModel {
+        let model = WheelModel(layout: .standard, favorites: favorites)
+        model.load(apps: apps, windows: windows, pointer: .zero, quickSwitchTo: previous, window: window,
+                   favoritesOnly: favoritesOnly)
         return model
     }
 }

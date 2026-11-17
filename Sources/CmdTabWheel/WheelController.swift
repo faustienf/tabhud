@@ -11,6 +11,7 @@ final class WheelController {
     private let window: WheelWindow
     private let previewer = WindowPreviewer()
     private let history = AppHistory()
+    private let favorites: Favorites
     /// The app in front when the wheel opened — gets its focus back if nothing is chosen.
     private var frontAppAtOpen: pid_t?
     /// The mouse while the wheel is open, on every screen and over Mission Control too.
@@ -30,7 +31,9 @@ final class WheelController {
     private var quittingApps: Set<pid_t> = []
 
     init() {
-        let model = WheelModel(layout: .standard)
+        let favorites = Favorites()
+        self.favorites = favorites
+        let model = WheelModel(layout: .standard, favorites: favorites.windows)
         self.model = model
         // Built up front so the first ⌘Tab shows it instantly.
         self.window = WheelWindow(size: model.layout.canvasSize, content: WheelView(model: model))
@@ -102,7 +105,20 @@ final class WheelController {
             if let item = model.selectedItem {
                 quit(item)
             }
+        case .toggleFavorites:
+            model.toggleFavoritesShown()
+            favorites.isShown = model.showsFavorites
+            log.notice("⌘Space: \(self.model.showsFavorites ? "favorites" : "every window", privacy: .public)")
+            updateLivePreview()
         }
+    }
+
+    /// ★ on the rail. The wheel stays open for the next one.
+    private func toggleFavorite(_ item: WheelItem) {
+        model.toggleFavorite(item)
+        favorites.save(model.favorites)
+        let change = model.isFavorite(item) ? "added to" : "removed from"
+        log.notice("a window of \(item.name, privacy: .public) \(change, privacy: .public) favorites")
     }
 
     /// Close button or ⌘W. The wheel stays open for the next one.
@@ -226,6 +242,8 @@ final class WheelController {
     private func appTerminated(_ pid: pid_t) {
         quittingApps.remove(pid)
         model.setQuitting(pid, false)
+        model.forgetFavorites(of: pid)
+        favorites.save(model.favorites)
         guard isOpen else { return }
         model.removeApp(pid)
         updateLivePreview()
@@ -245,9 +263,10 @@ final class WheelController {
         window.cover(screen)                  // pointer math below needs the final position
         let previous = history.previous(excluding: quittingApps)
         model.reload(pointer: cursorFromWheelCenter(), quickSwitchTo: previous,
-                     window: previous.flatMap { history.lastWindow(of: $0) }, leaving: quittingApps)
+                     window: previous.flatMap { history.lastWindow(of: $0) }, leaving: quittingApps,
+                     favoritesOnly: favorites.isShown)
         // The window the user is leaving: the front app's frontmost one (on-screen ones come first).
-        if let front = frontAppAtOpen, let window = model.windows[front]?.first, window.place == .here {
+        if let front = frontAppAtOpen, let window = model.allWindows[front]?.first, window.place == .here {
             history.noteWindow(window.id, of: front)
         }
         window.show()
@@ -257,9 +276,9 @@ final class WheelController {
         // Screenshot every app right away, before the user points anywhere. Previews from the
         // last opening are already on screen meanwhile; fresh ones replace them as they come.
         let model = self.model
-        // An app with several windows has several sectors — one entry per app is enough.
+        // Every window, favorite or not: ⌘Space shows the others right away.
         let windows = Dictionary(
-            model.items.map { item in (item.pid, (model.windows[item.pid] ?? []).map(\.id)) },
+            model.allApps.map { app in (app.pid, (model.allWindows[app.pid] ?? []).map(\.id)) },
             uniquingKeysWith: { first, _ in first }
         )
         previewer.refresh(windows: windows, maxSize: model.layout.previewSize) { key, image in
@@ -289,12 +308,16 @@ final class WheelController {
         updateLivePreview()
     }
 
-    /// The selected sector’s close action keeps the wheel open. Hub clicks do nothing;
+    /// The selected sector’s rail buttons keep the wheel open. Hub clicks do nothing;
     /// clicks on sectors switch to the app the cursor points at.
     private func clicked(at mouse: NSPoint) {
         guard isOpen else { return }
         let point = cursorFromWheelCenter(mouse)
         if model.isBusyActionRail(at: point) { return }
+        if let item = model.favoriteTarget(at: point) {
+            toggleFavorite(item)
+            return
+        }
         if let (item, window) = model.closeTarget(at: point) {
             closeWindow(window, of: item)
             return

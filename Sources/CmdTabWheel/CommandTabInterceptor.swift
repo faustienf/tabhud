@@ -16,19 +16,26 @@ enum WheelInput: Equatable {
     case cancel                  // Esc
     case closeWindow             // ⌘W: close the selected window (quit an app with none)
     case quitApp                 // ⌘Q: quit the selected app
+    case toggleFavorites         // ⌘Space: every window ⇄ only the favorite ones
 }
 
 /// Catches ⌘Tab system-wide via a CGEventTap and turns it into `WheelInput`.
 /// Creating the tap requires Accessibility permission — without it `start()` returns false.
 /// Keyboard only: the mouse has its own tap, on only while the wheel is open (see MouseTap).
+/// ⌘Space has one of its own too, see `startSpaceTap`.
 @MainActor
 final class CommandTabInterceptor {
     var onInput: @MainActor (WheelInput) -> Void = { _ in }
 
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var spaceTap: CFMachPort?
+    private var spaceRunLoopSource: CFRunLoopSource?
     /// ⌘Tab was pressed and ⌘ is still held — the wheel is open.
-    private var isActive = false
+    private var isActive = false {
+        // ⌘Space is ours only while the wheel is open.
+        didSet { if let spaceTap, isActive != oldValue { CGEvent.tapEnable(tap: spaceTap, enable: isActive) } }
+    }
     /// Some app holds Secure Input, see `checkSecureInput`.
     private var isSecureInputOn = false
     private var secureInputTimer: Timer?
@@ -58,6 +65,7 @@ final class CommandTabInterceptor {
         CGEvent.tapEnable(tap: tap, enable: true)
         self.tap = tap
         self.runLoopSource = source
+        startSpaceTap()
 
         // Our tap works — now turn off the system switcher so it doesn't fire too.
         NativeSwitcher.setEnabled(false)
@@ -69,6 +77,35 @@ final class CommandTabInterceptor {
         }
         log.notice("⌘Tab interceptor started")
         return true
+    }
+
+    /// ⌘Space belongs to Spotlight or to switching input sources, and those take it before the
+    /// tap above sees it, the way the system switcher takes ⌘Tab. Turning them off like the
+    /// switcher would outlive a crash of ours, so instead this tap sits where key events enter
+    /// WindowServer, ahead of them. It sees Space only, and only while the wheel is open.
+    private func startSpaceTap() {
+        let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
+        guard let spaceTap = CGEvent.tapCreate(
+            tap: .cghidEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: mask,
+            callback: spaceTapCallback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            log.error("⌘Space tap failed: with the wheel open, ⌘Space may reach Spotlight")
+            return
+        }
+        CGEvent.tapEnable(tap: spaceTap, enable: false)
+        let source = CFMachPortCreateRunLoopSource(nil, spaceTap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        self.spaceTap = spaceTap
+        spaceRunLoopSource = source
+    }
+
+    /// macOS turned the ⌘Space tap off for being slow: back on if the wheel is still open.
+    fileprivate func spaceTapWasDisabled() {
+        if isActive, let spaceTap { CGEvent.tapEnable(tap: spaceTap, enable: true) }
     }
 
     /// While any app holds Secure Input (a focused password field; Chrome and some terminals
@@ -99,6 +136,15 @@ final class CommandTabInterceptor {
         secureInputTimer = nil
         NativeSwitcher.setEnabled(true)
         isActive = false
+        if let spaceTap {
+            CGEvent.tapEnable(tap: spaceTap, enable: false)
+            CFMachPortInvalidate(spaceTap)
+        }
+        if let spaceRunLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), spaceRunLoopSource, .commonModes)
+        }
+        spaceTap = nil
+        spaceRunLoopSource = nil
         guard let tap else { return }
         CGEvent.tapEnable(tap: tap, enable: false)
         if let runLoopSource {
@@ -151,6 +197,15 @@ final class CommandTabInterceptor {
         case .keyUp where isActive && (letter == "w" || letter == "q"):
             return false
 
+        // ⌘Space: every window ⇄ the favorite ones. Never passed on: Spotlight mustn't open,
+        // nor the input source change. Held down, it switches once.
+        case .keyDown where isActive && keyCode == KeyCode.space:
+            if !isRepeat { onInput(.toggleFavorites) }
+            return false
+
+        case .keyUp where isActive && keyCode == KeyCode.space:
+            return false
+
         case .flagsChanged where isActive && !command:
             isActive = false
             onInput(.commit)
@@ -165,6 +220,7 @@ final class CommandTabInterceptor {
 enum KeyCode {
     static let tab: Int64 = 48    // kVK_Tab
     static let escape: Int64 = 53 // kVK_Escape
+    static let space: Int64 = 49  // kVK_Space
 
     /// Latin letters at their US positions (kVK_ANSI_W, kVK_ANSI_Q).
     private static let usLetters: [Int64: String] = [13: "w", 12: "q"]
@@ -214,6 +270,30 @@ private func eventTapCallback(
     // The tap's run loop source is on the main run loop, so we are on the main thread.
     let pass = MainActor.assumeIsolated {
         interceptor.handle(type: type, keyCode: keyCode, flags: flags, character: character, isRepeat: isRepeat)
+    }
+    return pass ? Unmanaged.passUnretained(event) : nil
+}
+
+/// The ⌘Space tap's callback: Space goes through `handle` like every other key, the rest
+/// passes untouched on to the session tap.
+private func spaceTapCallback(
+    proxy: CGEventTapProxy,
+    type: CGEventType,
+    event: CGEvent,
+    userInfo: UnsafeMutableRawPointer?
+) -> Unmanaged<CGEvent>? {
+    guard let userInfo else { return Unmanaged.passUnretained(event) }
+    let interceptor = Unmanaged<CommandTabInterceptor>.fromOpaque(userInfo).takeUnretainedValue()
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        MainActor.assumeIsolated { interceptor.spaceTapWasDisabled() }
+        return Unmanaged.passUnretained(event)
+    }
+    let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+    guard keyCode == KeyCode.space else { return Unmanaged.passUnretained(event) }
+    let flags = event.flags
+    let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+    let pass = MainActor.assumeIsolated {
+        interceptor.handle(type: type, keyCode: keyCode, flags: flags, character: nil, isRepeat: isRepeat)
     }
     return pass ? Unmanaged.passUnretained(event) : nil
 }

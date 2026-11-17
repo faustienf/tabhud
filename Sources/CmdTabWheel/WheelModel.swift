@@ -56,17 +56,29 @@ final class WheelModel {
 
     let layout: WheelLayout
     private(set) var items: [WheelItem] = []
+    /// Use the unfiltered ring's density in both modes, so ⌘Space never enlarges icons.
+    private(set) var iconSize: CGFloat = 0
     private(set) var selectedIndex: Int?
     /// Visual feedback only: grows beyond the rim; keyboard uses the midpoint.
     private(set) var selectionReach: CGFloat = 0.5
     /// Window screenshots, shown in the hub. Kept between openings so the next ⌘Tab
     /// shows them instantly; refreshed in the background every time the wheel opens.
     private(set) var previews: [PreviewKey: NSImage] = [:]
-    /// Each app's windows — on screen first, front to back; then on other desktops and
-    /// minimized — taken when the wheel opens.
+    /// Each app's windows on the wheel — on screen first, front to back; then on other desktops
+    /// and minimized: all of them, or only the favorites (`showsFavorites`).
     private(set) var windows: [pid_t: [AppWindow]] = [:]
-    /// The pointer is on the close action in the selected sector’s outer rail.
-    private(set) var isCloseButtonHovered = false
+    /// Every app and every window, taken when the wheel opens, whichever of them it shows.
+    @ObservationIgnored private(set) var allApps: [WheelItem] = []
+    @ObservationIgnored private(set) var allWindows: [pid_t: [AppWindow]] = [:]
+    /// Windows picked with ★ on the rail, each with its app. Kept between openings.
+    private(set) var favorites: [CGWindowID: pid_t]
+    /// Only favorite windows are on the wheel; ⌘Space switches.
+    private(set) var showsFavorites = false
+    /// The favorites when the wheel opened or ⌘Space was pressed: a window un-starred since
+    /// keeps its sector until then, so a slip of the mouse can be undone right there.
+    @ObservationIgnored private var favoritesOnWheel: [CGWindowID: pid_t] = [:]
+    /// The pointer is on this button in the selected sector’s outer rail.
+    private(set) var hoveredRailButton: RailButton?
 
     var selectedItem: WheelItem? { selectedIndex.map { items[$0] } }
 
@@ -100,40 +112,51 @@ final class WheelModel {
     /// The cursor moved far enough from the anchor — the mouse drives the selection.
     @ObservationIgnored private var isPointerActive = false
 
-    init(layout: WheelLayout) {
+    init(layout: WheelLayout, favorites: [CGWindowID: pid_t] = [:]) {
         self.layout = layout
+        self.favorites = favorites
     }
 
     /// Regular apps (the ones with a Dock icon), in launch order — stable slots for muscle memory.
     /// Sorted explicitly: Apple documents the order of `runningApplications` as unspecified.
     /// `leaving`: apps on their way out that are still running.
     func reload(pointer: CGPoint, quickSwitchTo quickSwitchPID: pid_t?, window quickSwitchWindowID: CGWindowID?,
-                leaving: Set<pid_t> = []) {
+                leaving: Set<pid_t> = [], favoritesOnly: Bool = false) {
         let apps = NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular && !leaving.contains($0.processIdentifier) }
             .map { (app: $0, started: $0.startDate) } // look the date up once, not per comparison
             .sorted { ($0.started, $0.app.processIdentifier) < ($1.started, $1.app.processIdentifier) }
             .map { WheelItem(app: $0.app) }
         let windows = WindowList.windowsByApp(of: Set(apps.map(\.pid)))
-        load(apps: apps, windows: windows, pointer: pointer, quickSwitchTo: quickSwitchPID, window: quickSwitchWindowID)
+        load(apps: apps, windows: windows, pointer: pointer, quickSwitchTo: quickSwitchPID, window: quickSwitchWindowID,
+             favoritesOnly: favoritesOnly)
     }
 
     /// `reload` once the running apps (in slot order) and their windows are known.
     /// Tests start here.
     func load(apps: [WheelItem], windows: [pid_t: [AppWindow]], pointer: CGPoint,
-              quickSwitchTo quickSwitchPID: pid_t?, window quickSwitchWindowID: CGWindowID? = nil) {
+              quickSwitchTo quickSwitchPID: pid_t?, window quickSwitchWindowID: CGWindowID? = nil,
+              favoritesOnly: Bool = false) {
         self.quickSwitchPID = quickSwitchPID
         self.quickSwitchWindowID = quickSwitchWindowID
         wasTouched = false
         hasClosedSomething = false
         let running = Set(apps.map(\.pid))
-        self.windows = windows.filter { running.contains($0.key) }
+        allApps = apps
+        allWindows = windows.filter { running.contains($0.key) }
         quittingPIDs.formIntersection(running)
         closingWindows = closingWindows.filter { running.contains($0.value) }
-        items = sectors(for: apps)
+        showsFavorites = favoritesOnly
+        favoritesOnWheel = favorites
         select(nil)
+        showSectors()
+        // No favorites to show: everything, rather than an empty wheel.
+        if showsFavorites, items.isEmpty {
+            showsFavorites = false
+            showSectors()
+        }
         // Drop screenshots of windows that are gone and apps that have quit.
-        let windowIDs = Set(self.windows.values.flatMap { $0.map(\.id) })
+        let windowIDs = Set(allWindows.values.flatMap { $0.map(\.id) })
         previews = previews.filter { key, _ in
             switch key {
             case .window(let id): windowIDs.contains(id)
@@ -142,6 +165,24 @@ final class WheelModel {
         }
         anchorPointer(at: pointer)
         updateHover(at: pointer)
+    }
+
+    /// `windows` and `items` from every app and window: all of them, or only the favorites.
+    /// In favorites a hidden app stands for its favorite windows: they aren't listed while
+    /// it's hidden, and switching to it shows them again.
+    private func showSectors() {
+        let allSectorCount = allApps.reduce(0) { $0 + max(1, allWindows[$1.pid]?.count ?? 0) }
+        iconSize = layout.iconSize(count: allSectorCount)
+        let favoriteApps = Set(favoritesOnWheel.values)
+        var shown: [pid_t: [AppWindow]] = [:]
+        for (pid, appWindows) in allWindows {
+            let appShown = showsFavorites ? appWindows.filter { favoritesOnWheel[$0.id] == pid } : appWindows
+            if !appShown.isEmpty { shown[pid] = appShown }
+        }
+        windows = shown
+        items = sectors(for: showsFavorites
+            ? allApps.filter { shown[$0.pid] != nil || ($0.isHidden && favoriteApps.contains($0.pid)) }
+            : allApps)
     }
 
     /// One sector per app — or one per window of an app that has several.
@@ -176,7 +217,7 @@ final class WheelModel {
     /// A window was closed from the wheel: take it off right away instead of waiting for the app.
     /// (If the app keeps it open after all, say to ask about unsaved changes, it's back next time.)
     func removeWindow(_ id: CGWindowID, of pid: pid_t) {
-        windows[pid]?.removeAll { $0.id == id }
+        allWindows[pid]?.removeAll { $0.id == id }
         previews[.window(id)] = nil
         touch() // releasing ⌘ now must not count as a quick ⌘Tab
         hasClosedSomething = true
@@ -206,37 +247,30 @@ final class WheelModel {
     func removeApp(_ pid: pid_t) {
         quittingPIDs.remove(pid)
         closingWindows = closingWindows.filter { $0.value != pid }
-        guard items.contains(where: { $0.pid == pid }) else { return }
-        let gone = Set((windows[pid] ?? []).map(\.id))
-        windows[pid] = nil
+        guard allApps.contains(where: { $0.pid == pid }) else { return }
+        let gone = Set((allWindows[pid] ?? []).map(\.id))
+        allApps.removeAll { $0.pid == pid }
+        allWindows[pid] = nil
         previews = previews.filter { key, _ in
             switch key {
             case .window(let id): !gone.contains(id)
             case .app(let app): app != pid
             }
         }
-        rebuildSectors(dropping: pid)
+        rebuildSectors()
     }
 
     /// Sectors again after a window or an app went away. Indices shift with them, so the
     /// selection is placed anew: under the pointer when the mouse drives it; else on the same
     /// app (Tab to it, then ⌘W ⌘W ⌘W closes its windows one by one); else on whatever slid
     /// into its place.
-    private func rebuildSectors(dropping droppedPID: pid_t? = nil) {
+    private func rebuildSectors() {
         let previous = selectedIndex.map { (index: $0, pid: items[$0].pid) }
         // Re-placing the selection below is our doing, not a pick by the user.
         let closedSomething = hasClosedSomething
         defer { hasClosedSomething = closedSomething }
-        var seen = Set<pid_t>()
-        let apps = items.compactMap { item -> WheelItem? in
-            guard item.pid != droppedPID, seen.insert(item.pid).inserted else { return nil }
-            var app = item
-            app.window = nil
-            app.windowNumber = nil
-            return app
-        }
         select(nil) // before `items` changes: the old index may not exist any more
-        items = sectors(for: apps)
+        showSectors()
 
         if isPointerActive {
             // Removing the last window must not lose a busy rail under the cursor, even
@@ -247,8 +281,7 @@ final class WheelModel {
                 }
                 return items.firstIndex { $0.pid == previous.pid }
             }
-            if let owner, isActionRailBusy(for: items[owner]),
-               layout.actionRailContains(lastPointer, index: owner, count: items.count) {
+            if let owner, isActionRailBusy(for: items[owner]), railContains(lastPointer, index: owner) {
                 select(owner)
             }
             movePointer(to: lastPointer)
@@ -285,7 +318,58 @@ final class WheelModel {
 
     /// Keep the rail throughout the close request, including the handoff to quitting.
     func showsActionRail(for item: WheelItem) -> Bool {
-        isActionRailBusy(for: item) || closableWindow(of: item) != nil
+        isActionRailBusy(for: item) || chosenWindow(of: item) != nil
+    }
+
+    /// A button on the selected sector's rail.
+    enum RailButton: Hashable {
+        case close
+        case favorite
+    }
+
+    /// The rail's buttons, from the selection mark outward: × where it can close the window,
+    /// then ★ for any window. None while the rail shows progress.
+    func railButtons(for item: WheelItem) -> [RailButton] {
+        guard !isActionRailBusy(for: item), chosenWindow(of: item) != nil else { return [] }
+        return closableWindow(of: item) == nil ? [.favorite] : [.close, .favorite]
+    }
+
+    /// Whether ★ is lit for the window the sector brings up.
+    func isFavorite(_ item: WheelItem) -> Bool {
+        chosenWindow(of: item).map { favorites[$0.id] == item.pid } ?? false
+    }
+
+    /// ★ on the rail: the window the sector brings up joins the favorites, or leaves them.
+    /// It keeps its sector in favorites until the wheel opens again or ⌘Space is pressed.
+    func toggleFavorite(_ item: WheelItem) {
+        guard let window = chosenWindow(of: item) else { return }
+        favorites[window.id] = isFavorite(item) ? nil : item.pid
+    }
+
+    /// The app has quit: its windows are gone for good.
+    func forgetFavorites(of pid: pid_t) {
+        guard favorites.values.contains(pid) else { return }
+        favorites = favorites.filter { $0.value != pid }
+    }
+
+    /// ⌘Space: every window ⇄ only the favorite ones. When the mouse drives the selection the
+    /// pointer picks again; a sector picked with Tab stays picked if its window is still there.
+    func toggleFavoritesShown() {
+        let previous = selectedItem.map { (pid: $0.pid, window: chosenWindow(of: $0)?.id) }
+        let closedSomething = hasClosedSomething
+        defer { hasClosedSomething = closedSomething }
+        showsFavorites.toggle()
+        favoritesOnWheel = favorites
+        select(nil)
+        showSectors()
+        if isPointerActive {
+            movePointer(to: lastPointer)
+            return
+        }
+        if let previous {
+            select(items.firstIndex { $0.pid == previous.pid && chosenWindow(of: $0)?.id == previous.window })
+        }
+        updateHover(at: lastPointer)
     }
 
     func isActionRailBusy(for item: WheelItem) -> Bool {
@@ -329,7 +413,7 @@ final class WheelModel {
     func movePointer(to point: CGPoint) {
         lastPointer = point
         guard !items.isEmpty else {
-            if isCloseButtonHovered { isCloseButtonHovered = false }
+            if hoveredRailButton != nil { hoveredRailButton = nil }
             return
         }
         updateHover(at: point)
@@ -347,8 +431,7 @@ final class WheelModel {
         updateSelectionReach(distance: distance)
         // Keep the visible rail attached to its owner while aiming at its actions,
         // including the short path from the icon. This matters with tightly packed sectors.
-        if let index = selectedIndex, showsActionRail(for: items[index]),
-           layout.actionRailContains(point, index: index, count: items.count) {
+        if let index = selectedIndex, showsActionRail(for: items[index]), railContains(point, index: index) {
             return
         }
         guard distance >= layout.innerRadius else {
@@ -368,34 +451,54 @@ final class WheelModel {
     func item(at point: CGPoint) -> WheelItem? {
         let distance = hypot(point.x, point.y)
         guard !items.isEmpty, distance >= layout.innerRadius else { return nil }
-        if let index = selectedIndex, showsActionRail(for: items[index]),
-           layout.actionRailContains(point, index: index, count: items.count) {
+        if let index = selectedIndex, showsActionRail(for: items[index]), railContains(point, index: index) {
             return items[index]
         }
         let angle = atan2(point.y, point.x)
         return items[WheelGeometry.index(at: angle, count: items.count)]
     }
 
-    /// Only the action on the visible rail is clickable; hidden sectors have no close target.
+    /// Only the buttons on the visible rail are clickable; hidden sectors have none.
+    /// Where two hit areas meet, the nearer button wins.
+    func railButton(at point: CGPoint) -> RailButton? {
+        guard let index = selectedIndex else { return nil }
+        let buttons = railButtons(for: items[index])
+        return buttons.enumerated()
+            .map { slot, button in
+                let center = layout.railButtonCenter(slot: slot, index: index, count: items.count, buttons: buttons.count)
+                return (button: button, distance: hypot(point.x - center.x, point.y - center.y))
+            }
+            .filter { $0.distance <= WheelLayout.closeButtonHitRadius }
+            .min { $0.distance < $1.distance }?.button
+    }
+
     func closeTarget(at point: CGPoint) -> (item: WheelItem, window: AppWindow)? {
-        guard let index = selectedIndex, !isActionRailBusy(for: items[index]),
-              let window = closableWindow(of: items[index]) else { return nil }
-        let center = layout.closeButtonCenter(index: index, count: items.count)
-        guard hypot(point.x - center.x, point.y - center.y) <= WheelLayout.closeButtonHitRadius else { return nil }
-        return (items[index], window)
+        guard railButton(at: point) == .close, let item = selectedItem,
+              let window = closableWindow(of: item) else { return nil }
+        return (item, window)
+    }
+
+    func favoriteTarget(at point: CGPoint) -> WheelItem? {
+        railButton(at: point) == .favorite ? selectedItem : nil
     }
 
     /// A progress rail is feedback, not a close button or a shortcut into the quitting app.
     func isBusyActionRail(at point: CGPoint) -> Bool {
         guard let index = selectedIndex, isActionRailBusy(for: items[index]) else { return false }
-        return layout.actionRailContains(point, index: index, count: items.count)
+        return railContains(point, index: index)
     }
 
-    // MARK: Close button hover
+    /// The rail of sector `index`, as long as its buttons make it.
+    private func railContains(_ point: CGPoint, index: Int) -> Bool {
+        layout.actionRailContains(point, index: index, count: items.count,
+                                  buttons: railButtons(for: items[index]).count)
+    }
+
+    // MARK: Rail button hover
 
     private func updateHover(at point: CGPoint) {
-        let onButton = closeTarget(at: point) != nil
-        if onButton != isCloseButtonHovered { isCloseButtonHovered = onButton }
+        let hovered = railButton(at: point)
+        if hovered != hoveredRailButton { hoveredRailButton = hovered }
     }
 
     /// Tab / ⇧Tab: next / previous slot clockwise.
@@ -416,7 +519,7 @@ final class WheelModel {
         isPointerActive = false
         hasClosedSomething = false
         selectionReach = 0.5
-        if isCloseButtonHovered { isCloseButtonHovered = false }
+        if hoveredRailButton != nil { hoveredRailButton = nil }
     }
 
     private func anchorPointer(at point: CGPoint) {
@@ -485,8 +588,11 @@ struct WheelLayout {
 
     static let closeButtonSize: CGFloat = 16
     static let closeButtonHitRadius: CGFloat = 11
+    /// The rail with one button; additional buttons grow it equally at both ends.
     static let actionRailHalfAngle: Double = 0.085
     static let closeButtonAngleOffset: Double = 0.045
+    /// From one rail button to the next.
+    static let railButtonSpacing: Double = 0.075
     var actionRailRadius: CGFloat { outerRadius + 4.5 }
 
     /// The close action stays on the side opposite the icon’s window badge.
@@ -499,24 +605,51 @@ struct WheelLayout {
         WheelGeometry.angle(of: index, count: count)
     }
 
-    func closeButtonCenter(index: Int, count: Int) -> CGPoint {
-        let angle = WheelGeometry.angle(of: index, count: count) + actionRailDirection(index: index, count: count) * Self.closeButtonAngleOffset
+    /// The close button: the rail's first button, when it has one.
+    func closeButtonCenter(index: Int, count: Int, buttons: Int = 2) -> CGPoint {
+        railButtonCenter(slot: 0, index: index, count: count, buttons: buttons)
+    }
+
+    func railButtonCenter(slot: Int, index: Int, count: Int, buttons: Int = 2) -> CGPoint {
+        let offset = Self.closeButtonAngleOffset + Double(slot) * Self.railButtonSpacing - railContentShift(buttons: buttons)
+        let angle = WheelGeometry.angle(of: index, count: count) + actionRailDirection(index: index, count: count) * offset
         return CGPoint(x: actionRailRadius * cos(angle), y: actionRailRadius * sin(angle))
     }
 
-    /// The visible arc and a narrow approach from its icon keep the selected owner stable.
-    func actionRailContains(_ point: CGPoint, index: Int, count: Int) -> Bool {
+    /// Center the whole capsule on the sector, including its buttons and selection mark.
+    func actionRailSpan(index: Int, count: Int, buttons: Int) -> (start: Double, end: Double) {
+        let half = Self.actionRailHalfAngle + railContentShift(buttons: buttons)
+        return (-half, half)
+    }
+
+    func railSelectionSpan(index: Int, count: Int, buttons: Int) -> (start: Double, end: Double) {
+        let shift = railContentShift(buttons: buttons)
+        return actionRailDirection(index: index, count: count) > 0
+            ? (-0.065 - shift, -0.005 - shift)
+            : (0.005 + shift, 0.065 + shift)
+    }
+
+    private func railContentShift(buttons: Int) -> Double {
+        Double(max(buttons, 1) - 1) * Self.railButtonSpacing / 2
+    }
+
+    /// The visible arc and a narrow approach from its icon to each button keep the selected
+    /// owner stable.
+    func actionRailContains(_ point: CGPoint, index: Int, count: Int, buttons: Int = 2) -> Bool {
         let angle = WheelGeometry.angle(of: index, count: count)
         let railAngle = actionRailAngle(index: index, count: count)
         let offset = atan2(sin(atan2(point.y, point.x) - railAngle), cos(atan2(point.y, point.x) - railAngle))
+        let span = actionRailSpan(index: index, count: count, buttons: buttons)
         if abs(hypot(point.x, point.y) - actionRailRadius) <= Self.closeButtonHitRadius,
-           abs(offset) <= Self.actionRailHalfAngle + 0.035 { return true }
+           offset >= span.start - 0.035, offset <= span.end + 0.035 { return true }
         let start = CGPoint(x: iconRadius * cos(angle), y: iconRadius * sin(angle))
-        let end = closeButtonCenter(index: index, count: count)
-        let dx = end.x - start.x, dy = end.y - start.y
-        let t = ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)
-        guard t >= 0, t <= 1 else { return false }
-        return hypot(point.x - start.x - t * dx, point.y - start.y - t * dy) <= Self.closeButtonHitRadius
+        return (0..<max(buttons, 1)).contains { slot in
+            let end = railButtonCenter(slot: slot, index: index, count: count, buttons: buttons)
+            let dx = end.x - start.x, dy = end.y - start.y
+            let t = ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)
+            guard t >= 0, t <= 1 else { return false }
+            return hypot(point.x - start.x - t * dx, point.y - start.y - t * dy) <= Self.closeButtonHitRadius
+        }
     }
 
     /// What the wheel view draws on: the wheel plus room for what sticks out past the rim

@@ -19,6 +19,7 @@
 - Windows on other desktops and minimized ones are there too
 - Window previews, live after a second (Live Preview in the menu bar)
 - Close windows and quit apps without leaving the wheel
+- Favorite windows: star them on the wheel, ⌘Space shows only them
 - Lives in the menu bar; light and dark
 
 ## Install
@@ -54,6 +55,8 @@ It asks what to do; the first answer, the default, builds the app, puts it in Ap
 | Release ⌘, or click | Switch |
 | ⌘W, or × on the selected sector’s outer rail | Close the selected window; the app's last one quits the app, and so does ⌘W on an app with no windows |
 | ⌘Q | Quit the selected app |
+| ★ on the selected sector’s outer rail | Add the window to favorites, or take it out |
+| ⌘Space | Every window ⇄ only favorites; the next ⌘Tab opens the way you left it |
 | Esc | Cancel |
 
 ## Development

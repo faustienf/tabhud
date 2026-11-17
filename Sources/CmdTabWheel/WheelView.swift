@@ -91,34 +91,54 @@ struct WheelView: View {
         }
     }
 
-    /// A slim rail replaces the selected rim. The close action sits off the radial path.
+    /// A slim rail replaces the selected rim. Its actions (×, ★) sit off the radial path.
     @ViewBuilder
     private var actionRail: some View {
         if let index = model.selectedIndex, model.showsActionRail(for: model.items[index]) {
+            let item = model.items[index]
             let count = model.items.count
-            let center = model.layout.closeButtonCenter(index: index, count: count)
+            let buttons = model.railButtons(for: item)
+            let span = model.layout.actionRailSpan(index: index, count: count, buttons: buttons.count)
             let railAngle = model.layout.actionRailAngle(index: index, count: count)
-            let direction = model.layout.actionRailDirection(index: index, count: count)
+            let selection = model.layout.railSelectionSpan(index: index, count: count, buttons: buttons.count)
             ZStack {
                 ActionRailArc(angle: railAngle, radius: model.layout.actionRailRadius,
-                              start: -WheelLayout.actionRailHalfAngle, end: WheelLayout.actionRailHalfAngle)
+                              start: span.start, end: span.end)
                     .stroke(palette.border, style: StrokeStyle(lineWidth: 13.5, lineCap: .round))
                 ActionRailArc(angle: railAngle, radius: model.layout.actionRailRadius,
-                              start: -WheelLayout.actionRailHalfAngle, end: WheelLayout.actionRailHalfAngle)
+                              start: span.start, end: span.end)
                     .stroke(palette.actionRailSurface, style: StrokeStyle(lineWidth: 12.25, lineCap: .round))
-                if model.isActionRailBusy(for: model.items[index]) {
+                if model.isActionRailBusy(for: item) {
                     QuittingRailProgress(angle: railAngle, radius: model.layout.actionRailRadius)
                 } else {
                     ActionRailArc(angle: railAngle, radius: model.layout.actionRailRadius,
-                                  start: direction > 0 ? -0.065 : 0.005,
-                                  end: direction > 0 ? -0.005 : 0.065)
+                                  start: selection.start, end: selection.end)
                         .stroke(accent, style: StrokeStyle(lineWidth: 1.3 + 4.2 * model.selectionReach, lineCap: .round))
-                    CloseButton(size: WheelLayout.closeButtonSize, isHovered: model.isCloseButtonHovered)
-                        .offset(x: center.x, y: center.y)
+                    ForEach(Array(buttons.enumerated()), id: \.element) { slot, button in
+                        let center = model.layout.railButtonCenter(slot: slot, index: index, count: count, buttons: buttons.count)
+                        railButton(button, for: item)
+                            .offset(x: center.x, y: center.y)
+                    }
                 }
             }
             .id(index)
             .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
+    private func railButton(_ button: WheelModel.RailButton, for item: WheelItem) -> some View {
+        let isHovered = model.hoveredRailButton == button
+        switch button {
+        case .close:
+            RailButtonGlyph(button: .close, isHovered: isHovered)
+                .accessibilityLabel("Close window")
+                .accessibilityHint("Closes the window shown in the preview")
+        case .favorite:
+            let isFavorite = model.isFavorite(item)
+            RailButtonGlyph(button: .favorite, isLit: isFavorite, isHovered: isHovered)
+                .accessibilityLabel(isFavorite ? "Remove from favorites" : "Add to favorites")
+                .accessibilityHint("Command-Space shows only favorite windows")
         }
     }
 
@@ -158,13 +178,21 @@ struct WheelView: View {
                 .anchorPreference(key: WheelCaptionBounds.self, value: .bounds) { [$0] }
             } footer: {
                 VStack(spacing: 5) {
-                    Text(item.name)
-                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                        .tracking(-0.15)
-                        .foregroundStyle(palette.ink)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: innerRadius * 1.55)
+                    HStack(spacing: 7) {
+                        if model.showsFavorites {
+                            FavoriteGlyph()
+                                .frame(width: 12, height: 12)
+                                .foregroundStyle(accent)
+                                .accessibilityLabel("Favorites")
+                        }
+                        Text(item.name)
+                            .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                            .tracking(-0.15)
+                            .foregroundStyle(palette.ink)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .frame(maxWidth: innerRadius * 1.55)
                     VStack(spacing: 8) {
                         Rectangle()
                             .fill(palette.separator)
@@ -183,7 +211,8 @@ struct WheelView: View {
             }
         } else {
             VStack(spacing: 10) {
-                CommandKeycap(size: CGSize(width: 48, height: 48), symbolSize: 25, isAccented: true)
+                CommandKeycap(size: CGSize(width: 48, height: 48), symbolSize: 25, isAccented: true,
+                              isFavorite: model.showsFavorites)
                     .background {
                         Circle()
                             .fill(RadialGradient(colors: [accent.opacity(palette.isDark ? 0.1 : 0.06), .clear],
@@ -192,16 +221,26 @@ struct WheelView: View {
                             .accessibilityHidden(true)
                     }
                 VStack(spacing: 5) {
-                    Text("Choose an app")
+                    Text(emptyHubTitle)
                         .font(.system(size: 14, weight: .medium, design: .monospaced))
                         .foregroundStyle(palette.ink.opacity(0.9))
-                    Text("Move the pointer or press Tab")
+                    Text(emptyHubHint)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(palette.secondaryInk)
                 }
                 .anchorPreference(key: WheelCaptionBounds.self, value: .bounds) { [$0] }
             }
         }
+    }
+
+    private var emptyHubTitle: String {
+        if !model.showsFavorites { return "Choose an app" }
+        return model.items.isEmpty ? "No favorite windows" : "Choose a favorite"
+    }
+
+    private var emptyHubHint: String {
+        if !model.showsFavorites { return "Move the pointer or press Tab" }
+        return model.items.isEmpty ? "⌘Space, then ★ on a window" : "⌘Space for every window"
     }
 
     private var releaseHint: some View {
@@ -220,7 +259,7 @@ struct WheelView: View {
 
     private var icons: some View {
         let count = model.items.count
-        let size = model.layout.iconSize(count: count)
+        let size = model.iconSize
         return ZStack {
             ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
                 let isSelected = index == model.selectedIndex
@@ -237,6 +276,13 @@ struct WheelView: View {
                                 .offset(x: size * 0.035, y: -size * 0.035)
                         }
                     }
+                    .overlay(alignment: .topLeading) {
+                        // In favorites every window is one: no mark needed.
+                        if !model.showsFavorites, model.isFavorite(item) {
+                            FavoriteMark(size: max(12, min(17, size * 0.29)))
+                                .offset(x: -size * 0.035, y: -size * 0.035)
+                        }
+                    }
                     .modifier(QuittingAppAppearance(isQuitting: isQuitting))
                     .overlay(alignment: .bottom) {
                         if !isQuitting {
@@ -250,6 +296,7 @@ struct WheelView: View {
                     .scaleEffect(isSelected && !reduceMotion ? 1.045 : 1)
                     .offset(x: iconRadius * cos(angle), y: iconRadius * sin(angle))
                     .accessibilityLabel([item.name, item.launchedBy.map { "started by \($0)" },
+                                         model.isFavorite(item) ? "favorite" : nil,
                                          isQuitting ? "quitting" : nil].compactMap { $0 }.joined(separator: ", "))
                     .accessibilityAddTraits(isSelected ? [.isSelected] : [])
             }
@@ -317,22 +364,53 @@ private struct WheelCaptionBounds: PreferenceKey {
 
 /// An action embedded in the selected sector’s rail, outside the app icon.
 /// Clicks never reach SwiftUI here (WheelWindow takes them all) — WheelModel hit-tests it.
-private struct CloseButton: View {
-    let size: CGFloat
+private struct RailButtonGlyph: View {
+    let button: WheelModel.RailButton
+    /// On: a favorite's ★.
+    var isLit = false
     let isHovered: Bool
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let palette = WheelPalette(isDark: colorScheme == .dark)
         let shape = Circle().inset(by: 2)
-        Image(systemName: "xmark")
-            .font(.system(size: 8.5, weight: .medium))
-            .foregroundStyle(isHovered ? palette.accent : palette.ink.opacity(0.8))
+        let size = WheelLayout.closeButtonSize
+        glyph
+            .foregroundStyle(isHovered || isLit ? palette.accent : palette.ink.opacity(0.8))
             .frame(width: size, height: size)
             .background(shape.fill(isHovered ? palette.accent.opacity(0.18) : .clear))
             .animation(.easeOut(duration: 0.1), value: isHovered)
-            .accessibilityLabel("Close window")
-            .accessibilityHint("Closes the window shown in the preview")
+    }
+
+    @ViewBuilder
+    private var glyph: some View {
+        switch button {
+        case .close:
+            Image(systemName: "xmark")
+                .font(.system(size: 8, weight: .medium))
+        case .favorite:
+            FavoriteGlyph(isFilled: isLit)
+                .frame(width: 9, height: 9)
+        }
+    }
+}
+
+/// ★ on the corner of a favorite window's icon, opposite the launcher mark.
+private struct FavoriteMark: View {
+    let size: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let palette = WheelPalette(isDark: colorScheme == .dark)
+        let plate = RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
+        FavoriteGlyph()
+            .frame(width: size * 0.56, height: size * 0.56)
+            .foregroundStyle(palette.accent)
+            .frame(width: size, height: size)
+            .background(plate.fill(palette.markSurface))
+            .overlay(plate.strokeBorder(palette.ink.opacity(palette.isDark ? 0.20 : 0.12), lineWidth: 0.65))
+            .shadow(color: .black.opacity(palette.previewShadow), radius: 1, y: 0.5)
+            .accessibilityHidden(true)
     }
 }
 
@@ -348,6 +426,7 @@ private struct CommandKeycap: View {
     let size: CGSize
     let symbolSize: CGFloat
     var isAccented = false
+    var isFavorite = false
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -355,13 +434,23 @@ private struct CommandKeycap: View {
         let shape = RoundedRectangle(cornerRadius: size.height * (isAccented ? 0.16 : 0.24), style: .continuous)
         let palette = WheelPalette(isDark: isDark)
         let tint = isAccented ? palette.accent : palette.ink
-        return Image(systemName: "command")
-            .font(.system(size: symbolSize, weight: .medium))
+        return glyph
             .foregroundStyle(isAccented ? palette.accent.opacity(0.9) : palette.secondaryInk)
             .frame(width: size.width, height: size.height)
             .background(shape.fill(isAccented ? palette.actionRailSurface : tint.opacity(isDark ? 0.06 : 0.035)))
             .overlay(shape.strokeBorder(isAccented ? palette.accent.opacity(0.28) : palette.border, lineWidth: 0.65))
             .shadow(color: isAccented ? palette.accent.opacity(isDark ? 0.09 : 0.04) : .clear, radius: 12)
+    }
+
+    @ViewBuilder
+    private var glyph: some View {
+        if isFavorite {
+            FavoriteGlyph()
+                .frame(width: symbolSize, height: symbolSize)
+        } else {
+            Image(systemName: "command")
+                .font(.system(size: symbolSize, weight: .medium))
+        }
     }
 }
 
@@ -376,7 +465,9 @@ private struct SectorShape: Shape {
         let center = CGPoint(x: rect.midX, y: rect.midY)
         let mid = WheelGeometry.angle(of: index, count: count)
         let gap = count > 1 ? min(0.025, WheelGeometry.sectorAngle(count: count) * 0.08) : 0
-        let half = WheelGeometry.sectorAngle(count: count) / 2 - gap
+        // A sparse favorites ring still highlights the selected icon, rather than lighting
+        // up the entire wheel for a single window. Selection hit areas stay unchanged.
+        let half = min(WheelGeometry.sectorAngle(count: count) / 2 - gap, .pi / 3)
         let start = Angle(radians: mid - half)
         let end = Angle(radians: mid + half)
 

@@ -49,4 +49,39 @@ struct GeometryTests {
             #expect(!layout.actionRailContains(CGPoint(x: -center.x, y: -center.y), index: index, count: count))
         }
     }
+
+    @Test(arguments: [3, 8, 13])
+    func theStarSitsPastTheCloseButtonOnALongerRail(count: Int) {
+        let layout = WheelLayout.standard
+        for index in 0..<count {
+            let close = layout.closeButtonCenter(index: index, count: count)
+            let star = layout.railButtonCenter(slot: 1, index: index, count: count)
+            #expect(abs(hypot(star.x, star.y) - layout.actionRailRadius) < 0.001)
+            #expect(hypot(star.x - close.x, star.y - close.y) > WheelLayout.closeButtonSize)
+            #expect(layout.actionRailContains(star, index: index, count: count, buttons: 2))
+            // Away from the icon on the same side as the close button.
+            let icon = WheelGeometry.angle(of: index, count: count)
+            let sideOf = { (point: CGPoint) in sin(atan2(point.y, point.x) - icon) }
+            #expect(abs(sideOf(star)) > abs(sideOf(close)))
+            #expect(sideOf(star).sign == sideOf(close).sign)
+        }
+    }
+
+    @Test(arguments: [1, 2, 3, 8, 13, 30], [0, 1, 2])
+    func theWholeRailIsCenteredOnItsIcon(count: Int, buttons: Int) {
+        let layout = WheelLayout.standard
+        for index in 0..<count {
+            let span = layout.actionRailSpan(index: index, count: count, buttons: buttons)
+            #expect(abs(span.start + span.end) < 0.000_001)
+            let selection = layout.railSelectionSpan(index: index, count: count, buttons: buttons)
+            #expect(selection.start > span.start && selection.end < span.end)
+            for slot in 0..<buttons {
+                let center = layout.railButtonCenter(slot: slot, index: index, count: count, buttons: buttons)
+                #expect(layout.actionRailContains(center, index: index, count: count, buttons: buttons))
+                let angle = atan2(center.y, center.x) - WheelGeometry.angle(of: index, count: count)
+                let offset = atan2(sin(angle), cos(angle))
+                #expect(offset > span.start && offset < span.end)
+            }
+        }
+    }
 }

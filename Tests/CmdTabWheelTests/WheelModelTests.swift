@@ -369,7 +369,10 @@ struct ClosingTests {
     @Test func aBusyRailKeepsItsOwnerWhenItsEndCrossesIntoANeighboringSector() throws {
         let model = F.wheel((1...80).map { F.app(pid_t($0), "App \($0)") }, windows: [1: [F.window(101)]])
         model.point(at: 0)
-        let center = model.layout.closeButtonCenter(index: 0, count: model.items.count)
+        // Busy rails have no buttons: test their outer end, regardless of action placement.
+        let end = model.layout.actionRailSpan(index: 0, count: model.items.count, buttons: 0).end
+        let angle = model.layout.actionRailAngle(index: 0, count: model.items.count) + end
+        let center = CGPoint(x: model.layout.actionRailRadius * cos(angle), y: model.layout.actionRailRadius * sin(angle))
         #expect(WheelGeometry.index(at: atan2(center.y, center.x), count: model.items.count) != 0)
         model.movePointer(to: center)
         model.beginClosingWindow(101, of: 1)
@@ -437,5 +440,176 @@ struct WindowsElsewhereTests {
         // That window is gone: the front one, then.
         #expect(F.wheel([F.app(2, "Chrome")], windows: windows, quickSwitchTo: 2, window: 999)
             .quickSwitchItem?.window?.id == 201)
+    }
+}
+
+// MARK: - Favorites
+
+@MainActor
+struct FavoriteTests {
+    /// Finder without windows; Safari with 201–203 (front to back: 203, 201, 202), 202 a
+    /// favorite; Notes with 301, a favorite.
+    private func wheel(favorites: [CGWindowID: pid_t] = [202: 2, 301: 3], favoritesOnly: Bool = false,
+                       quickSwitchTo previous: pid_t? = nil, window: CGWindowID? = nil) -> WheelModel {
+        F.wheel([F.app(1, "Finder"), F.app(2, "Safari"), F.app(3, "Notes")],
+                windows: [2: [F.window(203), F.window(201), F.window(202)], 3: [F.window(301)]],
+                quickSwitchTo: previous, window: window, favorites: favorites, favoritesOnly: favoritesOnly)
+    }
+
+    @Test func favoritesShowOnlyTheStarredWindows() throws {
+        let model = wheel(favoritesOnly: true)
+        #expect(model.showsFavorites)
+        #expect(model.names == ["Safari", "Notes"])
+        // One favorite of three: Safari is one sector again, and it brings up that window.
+        let safari = try #require(model.items.first)
+        #expect(model.chosenWindow(of: safari)?.id == 202)
+        #expect(model.windowPosition(of: safari) == nil)
+        // Screenshots and the window the user leaves still go by every window.
+        #expect(model.allWindows[2]?.count == 3)
+    }
+
+    @Test func withNoFavoriteOnTheWheelItOpensWithEverything() {
+        #expect(!wheel(favorites: [:], favoritesOnly: true).showsFavorites)
+        #expect(wheel(favorites: [999: 2], favoritesOnly: true).names.count == 5) // that window is gone
+        // A window ID stored with another app (from before a restart, say) isn't a favorite.
+        #expect(!wheel(favorites: [301: 2], favoritesOnly: true).showsFavorites)
+    }
+
+    @Test func commandSpaceSwitchesBackAndForth() {
+        let model = wheel()
+        model.toggleFavoritesShown()
+        #expect(model.showsFavorites && model.names == ["Safari", "Notes"])
+        model.toggleFavoritesShown()
+        #expect(!model.showsFavorites && model.names.count == 5)
+    }
+
+    @Test(arguments: [1, 3])
+    func favoritesKeepTheUnfilteredIconSize(favoriteCount: Int) {
+        let apps = [F.app(1, "Finder"), F.app(2, "Safari")]
+        let windows: [pid_t: [AppWindow]] = [2: (201...224).map { F.window(CGWindowID($0)) }]
+        let favorites = Dictionary(uniqueKeysWithValues: (201..<(201 + favoriteCount)).map { (CGWindowID($0), pid_t(2)) })
+        let model = F.wheel(apps, windows: windows, favorites: favorites)
+        let size = model.iconSize
+        #expect(size == model.layout.iconSize(count: 25)) // includes each window, plus Finder
+        #expect(size < 60)
+        model.toggleFavoritesShown()
+        #expect(model.items.count == favoriteCount)
+        #expect(model.iconSize == size)
+        model.toggleFavoritesShown()
+        #expect(model.iconSize == size)
+        // Opening directly in favorites uses the same size too.
+        #expect(F.wheel(apps, windows: windows, favorites: favorites, favoritesOnly: true).iconSize == size)
+    }
+
+    @Test func commandSpaceWithNoFavoritesShowsAnEmptyWheel() {
+        let model = wheel(favorites: [:])
+        model.toggleFavoritesShown()
+        #expect(model.showsFavorites && model.items.isEmpty)
+        model.step(backward: false)
+        #expect(model.selectedItem == nil)
+    }
+
+    @Test func aSectorPickedWithTabStaysPickedIfItsWindowIsThere() {
+        let model = wheel()
+        for _ in 0..<3 { model.step(backward: false) } // Safari #2: 202
+        model.toggleFavoritesShown()
+        #expect(model.selectedItem.flatMap { model.chosenWindow(of: $0) }?.id == 202)
+        model.toggleFavoritesShown()
+        #expect(model.selectedIndex == 2)
+
+        model.step(backward: false) // Safari #3: 203, not a favorite
+        model.toggleFavoritesShown()
+        #expect(model.selectedItem == nil)
+    }
+
+    @Test func thePointerPicksAgain() {
+        let model = wheel()
+        model.point(at: 4) // Notes, at 7 o'clock of five
+        let pointer = model.point(4)
+        model.toggleFavoritesShown()
+        let angle = atan2(pointer.y, pointer.x)
+        #expect(model.selectedIndex == WheelGeometry.index(at: angle, count: 2))
+    }
+
+    @Test func aQuickSwitchInFavoritesGoesToAFavoriteWindow() {
+        // Left from Safari's 203, which isn't one: its favorite window, then.
+        let model = wheel(favoritesOnly: true, quickSwitchTo: 2, window: 203)
+        #expect(model.quickSwitchItem.flatMap { model.chosenWindow(of: $0) }?.id == 202)
+        #expect(wheel(favoritesOnly: true, quickSwitchTo: 1).quickSwitchItem == nil) // Finder has none
+    }
+
+    @Test func theStarIsOnTheRailPastTheCloseButton() throws {
+        let model = wheel(favorites: [:])
+        for _ in 0..<4 { model.step(backward: false) } // Safari #3: 203
+        let item = try #require(model.selectedItem)
+        #expect(model.railButtons(for: item) == [.close, .favorite])
+        let count = model.items.count
+        let star = model.layout.railButtonCenter(slot: 1, index: 3, count: count)
+        #expect(model.closeTarget(at: model.layout.closeButtonCenter(index: 3, count: count))?.window.id == 203)
+        #expect(model.closeTarget(at: star) == nil)
+        #expect(model.favoriteTarget(at: star)?.window?.id == 203)
+
+        model.movePointer(to: star)
+        #expect(model.selectedIndex == 3) // the rail keeps its sector
+        #expect(model.hoveredRailButton == .favorite)
+        model.toggleFavorite(item)
+        #expect(model.isFavorite(item) && model.favorites == [203: 2])
+        model.toggleFavorite(item)
+        #expect(!model.isFavorite(item) && model.favorites.isEmpty)
+    }
+
+    @Test func aWindowThatCantBeClosedGetsOnlyTheStar() throws {
+        let model = F.wheel([F.app(2, "Safari")], windows: [2: [F.window(205, .otherDesktop("Desktop 2"))]])
+        model.step(backward: false)
+        let item = try #require(model.selectedItem)
+        #expect(model.showsActionRail(for: item))
+        #expect(model.railButtons(for: item) == [.favorite])
+        let first = model.layout.railButtonCenter(slot: 0, index: 0, count: 1, buttons: 1)
+        #expect(model.closeTarget(at: first) == nil)
+        #expect(model.favoriteTarget(at: first)?.pid == 2)
+    }
+
+    @Test func anAppWithoutWindowsOrABusyRailHasNoStar() throws {
+        let model = wheel()
+        model.step(backward: false) // Finder
+        #expect(model.railButtons(for: try #require(model.selectedItem)).isEmpty)
+        model.step(backward: false) // Safari #1
+        model.setQuitting(2, true)
+        #expect(model.railButtons(for: try #require(model.selectedItem)).isEmpty)
+    }
+
+    @Test func anUnstarredWindowKeepsItsSectorUntilTheWheelOpensAgain() throws {
+        let model = wheel(favoritesOnly: true)
+        model.step(backward: false)
+        model.step(backward: false) // Notes
+        let notes = try #require(model.selectedItem)
+        model.toggleFavorite(notes)
+        #expect(!model.isFavorite(notes))
+        #expect(model.names == ["Safari", "Notes"]) // star it again right there, if that was a slip
+        model.load(apps: [F.app(1, "Finder"), F.app(2, "Safari"), F.app(3, "Notes")],
+                   windows: [2: [F.window(202)], 3: [F.window(301)]], pointer: .zero, quickSwitchTo: nil,
+                   favoritesOnly: true)
+        #expect(model.names == ["Safari"])
+    }
+
+    @Test func closingAFavoriteWindowTakesItsSectorAlong() {
+        let model = wheel(favoritesOnly: true)
+        model.step(backward: false) // Safari: 202
+        model.removeWindow(202, of: 2)
+        #expect(model.names == ["Notes"])
+        #expect(model.selectedItem?.name == "Notes")
+    }
+
+    @Test func aHiddenAppStandsForItsFavoriteWindows() {
+        var telegram = F.app(4, "Telegram")
+        telegram.isHidden = true
+        let model = F.wheel([F.app(1, "Finder"), telegram], favorites: [401: 4], favoritesOnly: true)
+        #expect(model.names == ["Telegram"])
+    }
+
+    @Test func anAppThatQuitTakesItsFavoritesAlong() {
+        let model = wheel()
+        model.forgetFavorites(of: 3)
+        #expect(model.favorites == [202: 2])
     }
 }
