@@ -1,5 +1,4 @@
-# On every push and pull request: the tests, then the release build wrapped into the .app,
-# the way scripts/setup.sh installs it.
+# On every push and pull request: the tests, then the download a release would publish.
 name: CI
 
 on:
@@ -17,6 +16,4 @@ jobs:
       - name: Tests
         run: scripts/setup.sh test
       - name: Release build
-        run: swift build -c release
-      - name: Bundle the app
-        run: scripts/setup.sh bundle "$(swift build -c release --show-bin-path)/CmdTabWheel" build/CmdTabWheel.app
+        run: scripts/setup.sh package

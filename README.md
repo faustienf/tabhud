@@ -23,7 +23,19 @@
 
 ## Install
 
-No releases yet. Needs macOS 14+ and Xcode 16+.
+Needs macOS 14 or later. In Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/faustienf/tabwheel/main/scripts/download.sh | bash
+```
+
+It downloads the latest release, puts it in Applications and starts it; run it again to update. On first launch, the setup window asks for **Accessibility** (required) and **Screen Recording** (optional, for previews).
+
+Or download `CmdTabWheel.zip` from the [latest release](https://github.com/faustienf/tabwheel/releases/latest) and move the app to Applications. It isn't notarized, so macOS won't open it the first time: try to open it, then System Settings → Privacy & Security → **Open Anyway**.
+
+### From source
+
+Needs Xcode 16 or later.
 
 ```bash
 git clone https://github.com/faustienf/tabwheel.git
@@ -31,9 +43,7 @@ cd tabwheel
 scripts/setup.sh
 ```
 
-It asks what to do; the first answer, the default, builds the app, puts it in Applications and starts it. On first launch, the setup window asks for **Accessibility** (required) and **Screen Recording** (optional, for previews).
-
-To update, `git pull` and run `scripts/setup.sh` again: it quits the running copy and replaces it.
+It asks what to do; the first answer, the default, builds the app, puts it in Applications and starts it. To update, `git pull` and run `scripts/setup.sh` again.
 
 ## Keys
 
@@ -49,6 +59,8 @@ To update, `git pull` and run `scripts/setup.sh` again: it quits the running cop
 ## Development
 
 Open `Package.swift` in Xcode and press ⌘R, or run `scripts/setup.sh dev`. Tests: `scripts/setup.sh test`.
+
+To publish a release, push main and run `scripts/setup.sh release`: it tags the commit, and GitHub builds the download and publishes it.
 
 If the app dies without cleaning up and ⌘Tab stops working:
 

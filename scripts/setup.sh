@@ -10,6 +10,8 @@
 #   test      run the tests
 #   restore   quit the app and give ⌘Tab back to macOS (when the app died without doing it)
 #   bundle <binary> <app>   wrap a built binary into an .app (Xcode does this after each build)
+#   package   the download: build/release/CmdTabWheel.zip, for Apple silicon and Intel
+#   release   publish the pushed main as a GitHub release: tags it, GitHub builds and uploads it
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
@@ -121,6 +123,51 @@ run_tests() {
   swift test
 }
 
+# MARK: - Release
+
+# What people download: one binary for Apple silicon and Intel, ad-hoc signed (there's no
+# Developer ID), zipped → build/release/CmdTabWheel.zip. $1, if given: the version it must be
+# ("v18"), so a release can't go out under the wrong number.
+package_app() {
+  check_tools
+  local out="build/release" bin
+  echo "▸ swift build (release, Apple silicon and Intel)"
+  swift build -c release --arch arm64 --arch x86_64
+  bin="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/$EXECUTABLE"
+  rm -rf "$out"
+  SIGN_IDENTITY=- bundle_app "$bin" "$out/$APP_NAME"
+  "$LSREGISTER" -u "$out/$APP_NAME" # only the installed copy should be known to the system
+
+  local app="$out/$APP_NAME" version
+  version="v$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
+  [ -z "${1:-}" ] || [ "$1" = "$version" ] || fail "the app is $version, not $1"
+  local archs
+  archs="$(lipo -archs "$app/Contents/MacOS/$EXECUTABLE")"
+  [[ "$archs" == *arm64* && "$archs" == *x86_64* ]] || fail "not for both Apple silicon and Intel: $archs"
+  [ -f "$app/Contents/Resources/Assets.car" ] || fail "no icon in the app (actool needs Xcode)"
+  # Without extended attributes: `unzip` would turn them into ._ files that break the signature.
+  ditto -c -k --norsrc --noextattr --noacl --keepParent "$app" "$out/$EXECUTABLE.zip"
+  echo "✓ $out/$EXECUTABLE.zip: ⌘Tab Wheel $(version_of "$app")"
+}
+
+# Tags what's on GitHub's main with the version number and pushes the tag; GitHub Actions
+# (.github/workflows/release.yml) builds it with `package` and publishes the release.
+release() {
+  [ -z "$(git status --porcelain)" ] || fail "commit your changes first: a release is built from GitHub"
+  git fetch --quiet origin main
+  git merge-base --is-ancestor HEAD origin/main || fail "push main first: a release is built from GitHub"
+  local tag
+  tag="v$(version_number)"
+  ! git rev-parse --quiet --verify "refs/tags/$tag" >/dev/null || fail "$tag is out already"
+  git tag --annotate "$tag" --message "⌘Tab Wheel $tag"
+  git push --quiet origin "refs/tags/$tag"
+  local repo
+  repo="$(git remote get-url origin | sed -E 's#^(git@github\.com:|https://github\.com/)##; s#\.git$##')"
+  echo "✓ $tag pushed. GitHub builds and publishes it in a few minutes:"
+  echo "  https://github.com/$repo/actions"
+  echo "  https://github.com/$repo/releases/tag/$tag"
+}
+
 # MARK: - Give ⌘Tab back
 
 restore_switcher() {
@@ -183,7 +230,7 @@ stamp_version() {
     if [ "$(git -C "$ROOT" rev-parse --is-shallow-repository)" = true ]; then
       echo "⚠︎ no version number: a shallow clone has no history to count (git fetch --unshallow)" >&2
     else
-      number=$(($(git -C "$ROOT" rev-list --count HEAD) + 2))
+      number="$(version_number)"
     fi
     commit="$(git -C "$ROOT" rev-parse --short HEAD)"
     if [ -n "$(git -C "$ROOT" status --porcelain -- Sources Support Package.swift)" ]; then
@@ -192,6 +239,10 @@ stamp_version() {
   fi
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $number" -c "Set :CFBundleVersion $number" \
     -c "Add :GitCommit string $commit" "$plist"
+}
+
+version_number() {
+  echo $(($(git -C "$ROOT" rev-list --count HEAD) + 2))
 }
 
 # The version an app was stamped with, "v13 (d97685b)".
@@ -273,5 +324,7 @@ case "${1:-}" in
     [ $# -eq 3 ] || fail "usage: scripts/setup.sh bundle <binary> <output.app>"
     bundle_app "$2" "$3"
     ;;
-  *) fail "unknown command: $1 (there are install, dev, test, restore)" ;;
+  package) package_app "${2:-}" ;;
+  release) release ;;
+  *) fail "unknown command: $1 (there are install, dev, test, restore, package, release)" ;;
 esac
