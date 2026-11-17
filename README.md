@@ -7,7 +7,7 @@
 <p align="center">A radial app switcher for macOS: hold ⌘, press Tab, point at an app, let go.</p>
 
 <p align="center">
-  <img src="docs/wheel-preview.png" width="800" alt="The current graphite and green CRT wheel, with Terminal selected and its window preview in the middle">
+  <img src="docs/desktop-preview.jpg" width="960" alt="Desktop demo of ⌘Tab Wheel over light Safari and dark Finder windows on a deep blue space desktop with an illuminated rocky planet and distant galaxy: nineteen apps across twenty sectors, two Terminal windows, the first selected with a Started by Codex launch mark, and window contours visible through the green glass wheel">
 </p>
 
 ## Features

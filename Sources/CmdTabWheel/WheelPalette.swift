@@ -5,25 +5,25 @@ struct WheelPalette {
     let isDark: Bool
 
     var ink: Color {
-        isDark ? Color(red: 0.77, green: 0.91, blue: 0.71) : Color(red: 0.12, green: 0.18, blue: 0.12)
+        isDark ? Color(red: 0.76, green: 0.91, blue: 0.82) : Color(red: 0.12, green: 0.18, blue: 0.15)
     }
 
     var secondaryInk: Color {
-        isDark ? Color(red: 0.57, green: 0.70, blue: 0.53) : Color(red: 0.35, green: 0.43, blue: 0.33)
+        isDark ? Color(red: 0.55, green: 0.70, blue: 0.61) : Color(red: 0.33, green: 0.43, blue: 0.38)
     }
 
     var accent: Color {
-        isDark ? Color(red: 0.49, green: 0.95, blue: 0.38) : Color(red: 0.16, green: 0.43, blue: 0.13)
+        isDark ? Color(red: 0.48, green: 0.88, blue: 0.65) : Color(red: 0.08, green: 0.42, blue: 0.26)
     }
 
     var surfaceTop: Color {
-        isDark ? Color(red: 0.09, green: 0.12, blue: 0.095).opacity(0.34)
-               : Color(red: 0.97, green: 0.98, blue: 0.97).opacity(0.22)
+        isDark ? Color(red: 0.09, green: 0.12, blue: 0.11).opacity(0.34)
+               : Color(red: 0.97, green: 0.98, blue: 0.975).opacity(0.22)
     }
 
     var surfaceBottom: Color {
-        isDark ? Color(red: 0.05, green: 0.07, blue: 0.055).opacity(0.46)
-               : Color(red: 0.90, green: 0.93, blue: 0.91).opacity(0.34)
+        isDark ? Color(red: 0.05, green: 0.07, blue: 0.06).opacity(0.46)
+               : Color(red: 0.90, green: 0.93, blue: 0.92).opacity(0.34)
     }
 
     var grid: Color { accent.opacity(isDark ? 0.15 : 0.09) }
@@ -42,11 +42,11 @@ struct WheelPalette {
     var separator: Color { ink.opacity(0.12) }
 
     var actionRailSurface: Color {
-        isDark ? Color(red: 0.14, green: 0.19, blue: 0.14).opacity(0.98) : Color(white: 0.98).opacity(0.98)
+        isDark ? Color(red: 0.14, green: 0.19, blue: 0.16).opacity(0.98) : Color(white: 0.98).opacity(0.98)
     }
 
     var markSurface: Color {
-        isDark ? Color(red: 0.19, green: 0.25, blue: 0.18) : actionRailSurface
+        isDark ? Color(red: 0.19, green: 0.25, blue: 0.215) : actionRailSurface
     }
 
     var previewShadow: Double { isDark ? 0.26 : 0.12 }

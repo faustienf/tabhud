@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 let size = 1024
 let center = CGPoint(x: 512, y: 512)
 let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
-let phosphor = CGColor(red: 0.49, green: 0.95, blue: 0.38, alpha: 1)
+let phosphor = CGColor(red: 0.48, green: 0.88, blue: 0.65, alpha: 1)
 let outputDirectory = URL(fileURLWithPath: CommandLine.arguments.count > 1
     ? CommandLine.arguments[1] : "Support/AppIcon.icon/Assets", isDirectory: true)
 
@@ -100,15 +100,15 @@ try render("display.png") { context in
 
 try render("phosphor-orbit.png") { context in
     stroke(orbit(from: 0, to: 2 * .pi), in: context,
-           color: CGColor(red: 0.38, green: 0.61, blue: 0.33, alpha: 0.55), width: 13)
+           color: CGColor(red: 0.33, green: 0.57, blue: 0.42, alpha: 0.55), width: 13)
     let trace = orbit(from: .pi / 12, to: 5 * .pi / 12)
     stroke(trace, in: context, color: phosphor.copy(alpha: 0.24)!, width: 27, glow: 24)
     stroke(trace, in: context, color: phosphor, width: 20, glow: 9)
-    stroke(trace, in: context, color: CGColor(red: 0.76, green: 1, blue: 0.61, alpha: 0.9), width: 5)
+    stroke(trace, in: context, color: CGColor(red: 0.73, green: 1, blue: 0.84, alpha: 0.9), width: 5)
 }
 
 try render("phosphor-command.png") { context in
     let glyph = commandPath()
     stroke(glyph, in: context, color: phosphor.copy(alpha: 0.2)!, width: 35, glow: 26)
-    stroke(glyph, in: context, color: CGColor(red: 0.70, green: 0.99, blue: 0.57, alpha: 1), width: 28, glow: 8)
+    stroke(glyph, in: context, color: CGColor(red: 0.65, green: 0.95, blue: 0.78, alpha: 1), width: 28, glow: 8)
 }
