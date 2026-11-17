@@ -10,7 +10,7 @@
 #   test      run the tests
 #   restore   quit the app and give ⌘Tab back to macOS (when the app died without doing it)
 #   bundle <binary> <app>   wrap a built binary into an .app (Xcode does this after each build)
-#   package   the download: build/release/CmdTabWheel.zip, for Apple silicon and Intel
+#   package   the downloads, for Apple silicon and Intel: build/release/CmdTabWheel.dmg and .zip
 #   release   publish the pushed main as a GitHub release: tags it, GitHub builds and uploads it
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -126,8 +126,9 @@ run_tests() {
 # MARK: - Release
 
 # What people download: one binary for Apple silicon and Intel, ad-hoc signed (there's no
-# Developer ID), zipped → build/release/CmdTabWheel.zip. $1, if given: the version it must be
-# ("v18"), so a release can't go out under the wrong number.
+# Developer ID), in build/release/: CmdTabWheel.dmg to drag into Applications from a browser,
+# CmdTabWheel.zip for scripts/download.sh. $1, if given: the version it must be ("v18"), so a
+# release can't go out under the wrong number.
 package_app() {
   check_tools
   local out="build/release" bin
@@ -147,7 +148,33 @@ package_app() {
   [ -f "$app/Contents/Resources/Assets.car" ] || fail "no icon in the app (actool needs Xcode)"
   # Without extended attributes: `unzip` would turn them into ._ files that break the signature.
   ditto -c -k --norsrc --noextattr --noacl --keepParent "$app" "$out/$EXECUTABLE.zip"
-  echo "✓ $out/$EXECUTABLE.zip: ⌘Tab Wheel $(version_of "$app")"
+
+  local dmgbuild
+  dmgbuild="$(dmgbuild_tool)"
+  echo "▸ drawing the DMG window"
+  swift scripts/draw-dmg-background.swift "$out/dmg-background.tiff"
+  "$dmgbuild" -s scripts/dmg-settings.py -D app="$app" -D background="$out/dmg-background.tiff" \
+    "⌘Tab Wheel $version" "$out/$EXECUTABLE.dmg" >/dev/null
+  echo "✓ $out/$EXECUTABLE.dmg and .zip: ⌘Tab Wheel $(version_of "$app")"
+}
+
+# dmgbuild lays out the DMG window without Finder, so it works on CI too. It's a Python tool:
+# it goes into a virtualenv in build/, downloaded on first use.
+DMGBUILD=(dmgbuild==1.6.7 ds_store==1.3.3 mac_alias==2.2.3)
+dmgbuild_tool() {
+  local venv="$ROOT/build/dmgbuild" python
+  if [ ! -x "$venv/bin/python" ]; then
+    for python in python3 python3.14 python3.13 python3.12 python3.11 python3.10 \
+                  /opt/homebrew/bin/python3 /usr/local/bin/python3 ""; do
+      [ -n "$python" ] || fail "the DMG needs Python 3.10 or later: brew install python"
+      "$python" -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null && break
+    done
+    echo "▸ setting up dmgbuild in $venv" >&2
+    "$python" -m venv "$venv" >&2
+  fi
+  "$venv/bin/python" -m pip install --quiet --disable-pip-version-check "${DMGBUILD[@]}" >&2 \
+    || fail "couldn't install dmgbuild"
+  echo "$venv/bin/dmgbuild"
 }
 
 # Tags what's on GitHub's main with the version number and pushes the tag; GitHub Actions

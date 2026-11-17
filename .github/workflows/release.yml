@@ -1,4 +1,4 @@
-# A version tag pushed (scripts/setup.sh release does it): the tests, then the download built
+# A version tag pushed (scripts/setup.sh release does it): the tests, then the downloads built
 # from that commit and published as a GitHub release with what changed since the last one.
 name: Release
 
@@ -29,5 +29,5 @@ jobs:
             git log --format='**%s**%n%n%b' "$previous..$GITHUB_REF_NAME" | grep -v '^Co-Authored-By:' >> "$notes"
           fi
           echo "How to install: https://github.com/$GITHUB_REPOSITORY#install" >> "$notes"
-          gh release create "$GITHUB_REF_NAME" build/release/CmdTabWheel.zip \
+          gh release create "$GITHUB_REF_NAME" build/release/CmdTabWheel.dmg build/release/CmdTabWheel.zip \
             --title "⌘Tab Wheel $GITHUB_REF_NAME" --notes-file "$notes"

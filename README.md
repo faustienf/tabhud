@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/faustienf/tabwheel/main/scripts/dow
 
 It downloads the latest release, puts it in Applications and starts it; run it again to update. On first launch, the setup window asks for **Accessibility** (required) and **Screen Recording** (optional, for previews).
 
-Or download `CmdTabWheel.zip` from the [latest release](https://github.com/faustienf/tabwheel/releases/latest) and move the app to Applications. It isn't notarized, so macOS won't open it the first time: try to open it, then System Settings → Privacy & Security → **Open Anyway**.
+Or download [CmdTabWheel.dmg](https://github.com/faustienf/tabwheel/releases/latest/download/CmdTabWheel.dmg) and drag the app into Applications. It isn't notarized, so macOS won't open it the first time: try to open it, then System Settings → Privacy & Security → **Open Anyway**.
 
 ### From source
 
