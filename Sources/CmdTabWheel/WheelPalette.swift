@@ -16,6 +16,11 @@ struct WheelPalette {
         isDark ? Color(red: 0.48, green: 0.88, blue: 0.65) : Color(red: 0.08, green: 0.42, blue: 0.26)
     }
 
+    /// A restrained warm hover cue distinguishes closing from starring a window.
+    var destructive: Color {
+        isDark ? Color(red: 1, green: 0.59, blue: 0.53) : Color(red: 0.68, green: 0.22, blue: 0.18)
+    }
+
     var surfaceTop: Color {
         isDark ? Color(red: 0.09, green: 0.12, blue: 0.11).opacity(0.34)
                : Color(red: 0.97, green: 0.98, blue: 0.975).opacity(0.22)

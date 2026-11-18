@@ -46,6 +46,21 @@ struct WindowCounterBadge: View {
 
 /// A small position indicator beneath an app icon, only when it has several windows.
 struct WindowPositionIndicator: View {
+    /// Three dots standing for more windows than fit.
+    private static let aggregateWidth: CGFloat = 13.5
+
+    /// How many windows get a dot each; more get three dots for all of them.
+    private static func positionLimit(maxWidth: CGFloat) -> Int {
+        max(1, min(7, Int((maxWidth - 1) / 6)))
+    }
+
+    /// How wide it is: 0 for an app with one window.
+    static func width(count: Int, maxWidth: CGFloat) -> CGFloat {
+        guard count > 1 else { return 0 }
+        guard count <= positionLimit(maxWidth: maxWidth) else { return min(aggregateWidth, maxWidth) }
+        return 7 + 5.5 * CGFloat(count - 1)
+    }
+
     var number: Int?
     var count: Int
     var maxWidth: CGFloat
@@ -57,8 +72,7 @@ struct WindowPositionIndicator: View {
         if let number, count > 1 {
             let palette = WheelPalette(isDark: colorScheme == .dark)
             let current = min(max(number - 1, 0), count - 1)
-            let positionLimit = max(1, min(7, Int((maxWidth - 1) / 6)))
-            let isAggregate = count > positionLimit
+            let isAggregate = count > Self.positionLimit(maxWidth: maxWidth)
             HStack(spacing: 3) {
                 ForEach(0..<(isAggregate ? 3 : count), id: \.self) { index in
                     let isCurrent = !isAggregate && index == current
@@ -68,7 +82,7 @@ struct WindowPositionIndicator: View {
                         .frame(width: isCurrent ? 7 : 2.5, height: 2.5)
                 }
             }
-            .scaleEffect(isAggregate ? min(1, maxWidth / 13.5) : 1)
+            .scaleEffect(isAggregate ? min(1, maxWidth / Self.aggregateWidth) : 1)
             .frame(height: 3)
             .animation(.easeOut(duration: 0.1), value: isSelected)
             .accessibilityElement(children: .ignore)

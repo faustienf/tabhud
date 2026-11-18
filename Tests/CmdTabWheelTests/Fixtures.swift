@@ -36,4 +36,13 @@ extension WheelModel {
     }
 
     var names: [String] { items.map(\.name) }
+
+    /// Where sector `index`'s × and ★ are.
+    func closeKey(_ index: Int) -> CGPoint {
+        layout.closeButtonCenter(index: index, count: items.count)
+    }
+
+    func starKey(_ index: Int) -> CGPoint {
+        layout.railButtonCenter(slot: 1, index: index, count: items.count)
+    }
 }

@@ -274,9 +274,8 @@ struct ClosingTests {
     @Test func theCloseButtonIsOnlyOnTheSelectedSector() {
         let model = wheel()
         for _ in 0..<4 { model.step(backward: false) } // Safari #2
-        let count = model.items.count
-        #expect(model.closeTarget(at: model.layout.closeButtonCenter(index: 3, count: count))?.window.id == 202)
-        #expect(model.closeTarget(at: model.layout.closeButtonCenter(index: 4, count: count)) == nil)
+        #expect(model.closeTarget(at: model.closeKey(3))?.window.id == 202)
+        #expect(model.closeTarget(at: model.closeKey(4)) == nil)
     }
 
     @Test func theQuittingRailStaysAfterTheLastWindowAndCannotBeClickedAgain() throws {
@@ -289,7 +288,7 @@ struct ClosingTests {
         #expect(item.pid == 4)
         #expect(model.closableWindow(of: item) == nil)
         #expect(model.showsActionRail(for: item))
-        let center = model.layout.closeButtonCenter(index: try #require(model.selectedIndex), count: model.items.count)
+        let center = model.closeKey(try #require(model.selectedIndex))
         model.movePointer(to: center)
         #expect(model.selectedItem?.pid == 4)
         #expect(model.isBusyActionRail(at: center))
@@ -304,7 +303,7 @@ struct ClosingTests {
     @Test func closingTheLastWindowKeepsTheRailBusyBeforeTheQuitCheckReturns() throws {
         let model = wheel()
         model.point(at: 5) // Notes
-        let center = model.layout.closeButtonCenter(index: 5, count: model.items.count)
+        let center = model.closeKey(5)
         model.movePointer(to: center)
         #expect(model.closeTarget(at: center)?.window.id == 401)
 
@@ -353,7 +352,7 @@ struct ClosingTests {
         let model = wheel()
         model.point(at: 5)
         model.setQuitting(4, true)
-        let center = model.layout.closeButtonCenter(index: 5, count: model.items.count)
+        let center = model.closeKey(5)
         #expect(model.isBusyActionRail(at: center))
         #expect(model.closeTarget(at: center) == nil) // even with its window still listed
 
@@ -369,10 +368,7 @@ struct ClosingTests {
     @Test func aBusyRailKeepsItsOwnerWhenItsEndCrossesIntoANeighboringSector() throws {
         let model = F.wheel((1...80).map { F.app(pid_t($0), "App \($0)") }, windows: [1: [F.window(101)]])
         model.point(at: 0)
-        // Busy rails have no buttons: test their outer end, regardless of action placement.
-        let end = model.layout.actionRailSpan(index: 0, count: model.items.count, buttons: 0).end
-        let angle = model.layout.actionRailAngle(index: 0, count: model.items.count) + end
-        let center = CGPoint(x: model.layout.actionRailRadius * cos(angle), y: model.layout.actionRailRadius * sin(angle))
+        let center = model.closeKey(0)
         #expect(WheelGeometry.index(at: atan2(center.y, center.x), count: model.items.count) != 0)
         model.movePointer(to: center)
         model.beginClosingWindow(101, of: 1)
@@ -414,7 +410,7 @@ struct WindowsElsewhereTests {
         let model = wheel()
         model.step(backward: false)
         model.step(backward: false) // Safari on Desktop 2
-        #expect(model.closeTarget(at: model.layout.closeButtonCenter(index: 1, count: 4)) == nil)
+        #expect(model.closeTarget(at: model.closeKey(1)) == nil)
     }
 
     @Test func theHubSaysWhereTheWindowIs() {
@@ -543,9 +539,8 @@ struct FavoriteTests {
         for _ in 0..<4 { model.step(backward: false) } // Safari #3: 203
         let item = try #require(model.selectedItem)
         #expect(model.railButtons(for: item) == [.close, .favorite])
-        let count = model.items.count
-        let star = model.layout.railButtonCenter(slot: 1, index: 3, count: count)
-        #expect(model.closeTarget(at: model.layout.closeButtonCenter(index: 3, count: count))?.window.id == 203)
+        let star = model.starKey(3)
+        #expect(model.closeTarget(at: model.closeKey(3))?.window.id == 203)
         #expect(model.closeTarget(at: star) == nil)
         #expect(model.favoriteTarget(at: star)?.window?.id == 203)
 
@@ -558,15 +553,35 @@ struct FavoriteTests {
         #expect(!model.isFavorite(item) && model.favorites.isEmpty)
     }
 
-    @Test func aWindowThatCantBeClosedGetsOnlyTheStar() throws {
+    @Test func theKeysMeetHalfwaySoNoClickBetweenThemSwitchesApps() throws {
+        let model = wheel()
+        model.step(backward: false) // Finder
+        model.step(backward: false) // Safari #1
+        let index = try #require(model.selectedIndex)
+        let close = model.closeKey(index)
+        let star = model.starKey(index)
+        let toward = { (key: CGPoint, t: CGFloat) in
+            CGPoint(x: (close.x + star.x) / 2 + t * (key.x - (close.x + star.x) / 2),
+                    y: (close.y + star.y) / 2 + t * (key.y - (close.y + star.y) / 2))
+        }
+        model.movePointer(to: toward(close, 0.1))
+        #expect(model.selectedIndex == index)
+        #expect(model.hoveredRailButton == .close)
+        #expect(model.closeTarget(at: toward(close, 0.1)) != nil)
+        #expect(model.favoriteTarget(at: toward(star, 0.1))?.pid == 2)
+    }
+
+    @Test func aWindowThatCantBeClosedGetsADimmedCloseKeyThatDoesNothing() throws {
         let model = F.wheel([F.app(2, "Safari")], windows: [2: [F.window(205, .otherDesktop("Desktop 2"))]])
         model.step(backward: false)
         let item = try #require(model.selectedItem)
         #expect(model.showsActionRail(for: item))
         #expect(model.railButtons(for: item) == [.favorite])
-        let first = model.layout.railButtonCenter(slot: 0, index: 0, count: 1, buttons: 1)
-        #expect(model.closeTarget(at: first) == nil)
-        #expect(model.favoriteTarget(at: first)?.pid == 2)
+        let close = model.closeKey(0)
+        let star = model.starKey(0)
+        #expect(model.closeTarget(at: close) == nil && model.favoriteTarget(at: close) == nil)
+        #expect(model.isOnRailKeys(at: close)) // the click is swallowed, not a switch
+        #expect(model.favoriteTarget(at: star)?.pid == 2)
     }
 
     @Test func anAppWithoutWindowsOrABusyRailHasNoStar() throws {

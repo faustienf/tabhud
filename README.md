@@ -53,9 +53,9 @@ It asks what to do; the first answer, the default, builds the app, puts it in Ap
 | ⌘Tab | Open the wheel |
 | Pointer, Tab, ⇧Tab | Select |
 | Release ⌘, or click | Switch |
-| ⌘W, or × on the selected sector’s outer rail | Close the selected window; the app's last one quits the app, and so does ⌘W on an app with no windows |
+| ⌘W, or × on the selected sector’s rim | Close the selected window; the app's last one quits the app, and so does ⌘W on an app with no windows |
 | ⌘Q | Quit the selected app |
-| ★ on the selected sector’s outer rail | Add the window to favorites, or take it out |
+| ★ on the selected sector’s rim | Add the window to favorites, or take it out |
 | ⌘Space | Every window ⇄ only favorites; the next ⌘Tab opens the way you left it |
 | Esc | Cancel |
 

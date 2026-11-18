@@ -322,6 +322,7 @@ final class WheelController {
             closeWindow(window, of: item)
             return
         }
+        if model.isOnRailKeys(at: point) { return }
         guard let item = model.item(at: point) else { return }
         log.notice("clicked \(item.name, privacy: .public)")
         let window = model.chosenWindow(of: item)?.id // before close() resets anything

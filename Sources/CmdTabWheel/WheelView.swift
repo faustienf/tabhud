@@ -8,7 +8,7 @@ struct WheelView: View {
 
     private var outerRadius: CGFloat { model.layout.outerRadius }
     private var innerRadius: CGFloat { model.layout.innerRadius }
-    private var iconRadius: CGFloat { model.layout.iconRadius }
+    private var iconRadius: CGFloat { model.iconRadius }
     private var palette: WheelPalette { WheelPalette(isDark: colorScheme == .dark) }
     private var accent: Color { palette.accent }
     private var isQuickSwitchPreview: Bool { model.selectedItem == nil && model.quickSwitchItem != nil }
@@ -37,7 +37,6 @@ struct WheelView: View {
             icons.animation(selectionAnimation, value: model.selectedIndex)
             actionRail
                 .animation(.easeOut(duration: reduceMotion ? 0.08 : 0.12), value: model.selectedIndex)
-                .animation(.easeOut(duration: 0.07), value: model.selectionReach)
         }
         .frame(width: model.layout.diameter, height: model.layout.diameter)
         .backgroundPreferenceValue(WheelCaptionBounds.self) { anchors in
@@ -56,6 +55,10 @@ struct WheelView: View {
         return ZStack {
             ForEach(0..<count, id: \.self) { index in
                 let isSelected = index == model.selectedIndex
+                // The keys sit in a break of the rim, with some rim left on both sides.
+                let keysHalf = isSelected && model.showsActionRail(for: model.items[index])
+                    ? model.layout.railKeysHalfAngle : 0
+                let rimHalf = keysHalf > 0 ? keysHalf + 14 / model.layout.railRadius : 0
                 SectorShape(index: index, count: count,
                             innerRadius: innerRadius + 5, outerRadius: outerRadius - 4)
                     .fill(RadialGradient(
@@ -75,7 +78,7 @@ struct WheelView: View {
                     .animation(.easeOut(duration: reduceMotion ? 0.06 : (isSelected ? 0.045 : 0.15)),
                                value: isSelected)
 
-                SelectionRim(index: index, count: count, radius: outerRadius - 3)
+                SelectionRim(index: index, count: count, radius: outerRadius - 3, minimumHalfAngle: rimHalf)
                     .stroke(accent.opacity(palette.isDark ? 0.32 : 0.16),
                             style: StrokeStyle(lineWidth: 5 + 4 * model.selectionReach, lineCap: .round))
                     .blur(radius: 5)
@@ -83,42 +86,27 @@ struct WheelView: View {
                     .animation(.easeOut(duration: reduceMotion ? 0.06 : (isSelected ? 0.045 : 0.15)),
                                value: isSelected)
 
-                SelectionRim(index: index, count: count, radius: outerRadius - 1)
+                SelectionRim(index: index, count: count, radius: outerRadius - 1, minimumHalfAngle: rimHalf,
+                             gapHalfAngle: keysHalf)
                     .stroke(accent.opacity(0.98), style: StrokeStyle(lineWidth: rimWidth, lineCap: .round))
                     .shadow(color: accent.opacity(0.28), radius: 3)
-                    .opacity(isSelected && !model.showsActionRail(for: model.items[index]) ? 1 : 0)
+                    .opacity(isSelected ? 1 : 0)
             }
         }
     }
 
-    /// A slim rail replaces the selected rim. Its actions (×, ★) sit off the radial path.
+    /// × and ★ in a break of the selection rim, centered on its axis.
     @ViewBuilder
     private var actionRail: some View {
         if let index = model.selectedIndex, model.showsActionRail(for: model.items[index]) {
             let item = model.items[index]
             let count = model.items.count
-            let buttons = model.railButtons(for: item)
-            let span = model.layout.actionRailSpan(index: index, count: count, buttons: buttons.count)
-            let railAngle = model.layout.actionRailAngle(index: index, count: count)
-            let selection = model.layout.railSelectionSpan(index: index, count: count, buttons: buttons.count)
+            let isBusy = model.isActionRailBusy(for: item)
             ZStack {
-                ActionRailArc(angle: railAngle, radius: model.layout.actionRailRadius,
-                              start: span.start, end: span.end)
-                    .stroke(palette.border, style: StrokeStyle(lineWidth: 13.5, lineCap: .round))
-                ActionRailArc(angle: railAngle, radius: model.layout.actionRailRadius,
-                              start: span.start, end: span.end)
-                    .stroke(palette.actionRailSurface, style: StrokeStyle(lineWidth: 12.25, lineCap: .round))
-                if model.isActionRailBusy(for: item) {
-                    QuittingRailProgress(angle: railAngle, radius: model.layout.actionRailRadius)
-                } else {
-                    ActionRailArc(angle: railAngle, radius: model.layout.actionRailRadius,
-                                  start: selection.start, end: selection.end)
-                        .stroke(accent, style: StrokeStyle(lineWidth: 1.3 + 4.2 * model.selectionReach, lineCap: .round))
-                    ForEach(Array(buttons.enumerated()), id: \.element) { slot, button in
-                        let center = model.layout.railButtonCenter(slot: slot, index: index, count: count, buttons: buttons.count)
-                        railButton(button, for: item)
-                            .offset(x: center.x, y: center.y)
-                    }
+                ForEach(Array([WheelModel.RailButton.close, .favorite].enumerated()), id: \.element) { slot, button in
+                    let center = model.layout.railButtonCenter(slot: slot, index: index, count: count)
+                    railKey(button, for: item, isBusy: isBusy)
+                        .offset(x: center.x, y: center.y)
                 }
             }
             .id(index)
@@ -127,16 +115,18 @@ struct WheelView: View {
     }
 
     @ViewBuilder
-    private func railButton(_ button: WheelModel.RailButton, for item: WheelItem) -> some View {
+    private func railKey(_ button: WheelModel.RailButton, for item: WheelItem, isBusy: Bool) -> some View {
         let isHovered = model.hoveredRailButton == button
         switch button {
         case .close:
-            RailButtonGlyph(button: .close, isHovered: isHovered)
+            // On another desktop the window can't be closed from here.
+            let isDimmed = !isBusy && model.closableWindow(of: item) == nil
+            RailKey(button: .close, isHovered: isHovered, isBusy: isBusy, isDimmed: isDimmed)
                 .accessibilityLabel("Close window")
-                .accessibilityHint("Closes the window shown in the preview")
+                .accessibilityHint(isDimmed ? "Not from another desktop" : "Closes the window shown in the preview")
         case .favorite:
             let isFavorite = model.isFavorite(item)
-            RailButtonGlyph(button: .favorite, isLit: isFavorite, isHovered: isHovered)
+            RailKey(button: .favorite, isLit: isFavorite, isHovered: isHovered, isBusy: isBusy)
                 .accessibilityLabel(isFavorite ? "Remove from favorites" : "Add to favorites")
                 .accessibilityHint("Command-Space shows only favorite windows")
         }
@@ -203,7 +193,7 @@ struct WheelView: View {
                                 .foregroundStyle(accent)
                                 .frame(height: 20)
                         } else {
-                            releaseHint
+                            actionHint
                         }
                     }
                 }
@@ -243,6 +233,24 @@ struct WheelView: View {
         return model.items.isEmpty ? "⌘Space, then ★ on a window" : "⌘Space for every window"
     }
 
+    @ViewBuilder
+    private var actionHint: some View {
+        if let button = model.hoveredRailButton, let item = model.selectedItem {
+            HStack(spacing: 8) {
+                Text(button == .close ? "Close window" :
+                        (model.isFavorite(item) ? "Remove from favorites" : "Add to favorites"))
+                if button == .close {
+                    Text("⌘W").foregroundStyle(palette.secondaryInk)
+                }
+            }
+            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .foregroundStyle(button == .close ? palette.destructive : accent)
+            .frame(height: 20)
+        } else {
+            releaseHint
+        }
+    }
+
     private var releaseHint: some View {
         HStack(spacing: 5) {
             Text("Release")
@@ -260,6 +268,8 @@ struct WheelView: View {
     private var icons: some View {
         let count = model.items.count
         let size = model.iconSize
+        let markSize = WheelLayout.markSize(iconSize: size)
+        let overhang = WheelLayout.markOverhang(iconSize: size)
         return ZStack {
             ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
                 let isSelected = index == model.selectedIndex
@@ -272,15 +282,15 @@ struct WheelView: View {
                     .shadow(color: .black.opacity(isSelected ? palette.previewShadow : palette.previewShadow / 2), radius: isSelected ? 4 : 2, y: 2)
                     .overlay(alignment: .topTrailing) {
                         if item.launchedBy != nil {
-                            LauncherMark(size: max(12, min(17, size * 0.29)))
-                                .offset(x: size * 0.035, y: -size * 0.035)
+                            LauncherMark(size: markSize)
+                                .offset(x: overhang, y: -overhang)
                         }
                     }
                     .overlay(alignment: .topLeading) {
                         // In favorites every window is one: no mark needed.
                         if !model.showsFavorites, model.isFavorite(item) {
-                            FavoriteMark(size: max(12, min(17, size * 0.29)))
-                                .offset(x: -size * 0.035, y: -size * 0.035)
+                            FavoriteMark(size: markSize)
+                                .offset(x: -overhang, y: -overhang)
                         }
                     }
                     .modifier(QuittingAppAppearance(isQuitting: isQuitting))
@@ -288,12 +298,12 @@ struct WheelView: View {
                         if !isQuitting {
                             WindowPositionIndicator(number: item.windowNumber, count: model.windows[item.pid]?.count ?? 0,
                                                     maxWidth: size, tint: accent, isSelected: isSelected)
-                                .padding(.top, 4)
+                                .padding(.top, WheelLayout.windowDotsGap)
                                 .alignmentGuide(.bottom) { $0[.top] }
                         }
                     }
                     .animation(.easeOut(duration: 0.12), value: isQuitting)
-                    .scaleEffect(isSelected && !reduceMotion ? 1.045 : 1)
+                    .scaleEffect(isSelected && !reduceMotion ? WheelLayout.selectedIconScale : 1)
                     .offset(x: iconRadius * cos(angle), y: iconRadius * sin(angle))
                     .accessibilityLabel([item.name, item.launchedBy.map { "started by \($0)" },
                                          model.isFavorite(item) ? "favorite" : nil,
@@ -359,39 +369,6 @@ private struct WheelCaptionBounds: PreferenceKey {
 
     static func reduce(value: inout [Anchor<CGRect>], nextValue: () -> [Anchor<CGRect>]) {
         value.append(contentsOf: nextValue())
-    }
-}
-
-/// An action embedded in the selected sector’s rail, outside the app icon.
-/// Clicks never reach SwiftUI here (WheelWindow takes them all) — WheelModel hit-tests it.
-private struct RailButtonGlyph: View {
-    let button: WheelModel.RailButton
-    /// On: a favorite's ★.
-    var isLit = false
-    let isHovered: Bool
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        let palette = WheelPalette(isDark: colorScheme == .dark)
-        let shape = Circle().inset(by: 2)
-        let size = WheelLayout.closeButtonSize
-        glyph
-            .foregroundStyle(isHovered || isLit ? palette.accent : palette.ink.opacity(0.8))
-            .frame(width: size, height: size)
-            .background(shape.fill(isHovered ? palette.accent.opacity(0.18) : .clear))
-            .animation(.easeOut(duration: 0.1), value: isHovered)
-    }
-
-    @ViewBuilder
-    private var glyph: some View {
-        switch button {
-        case .close:
-            Image(systemName: "xmark")
-                .font(.system(size: 8, weight: .medium))
-        case .favorite:
-            FavoriteGlyph(isFilled: isLit)
-                .frame(width: 9, height: 9)
-        }
     }
 }
 
@@ -479,31 +456,31 @@ private struct SectorShape: Shape {
     }
 }
 
-struct ActionRailArc: Shape {
-    let angle: Double
-    let radius: CGFloat
-    let start: Double
-    let end: Double
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.addArc(center: CGPoint(x: rect.midX, y: rect.midY), radius: radius,
-                    startAngle: .radians(angle + start), endAngle: .radians(angle + end), clockwise: false)
-        return path
-    }
-}
-
 private struct SelectionRim: Shape {
     let index: Int
     let count: Int
     let radius: CGFloat
+    var minimumHalfAngle: Double = 0
+    /// Left open in the middle, for the keys.
+    var gapHalfAngle: Double = 0
 
     func path(in rect: CGRect) -> Path {
         let mid = WheelGeometry.angle(of: index, count: count)
-        let half = min(WheelGeometry.sectorAngle(count: count) * 0.28, 0.24)
+        let half = max(min(WheelGeometry.sectorAngle(count: count) * 0.28, 0.24), minimumHalfAngle)
+        let center = CGPoint(x: rect.midX, y: rect.midY)
         var path = Path()
-        path.addArc(center: CGPoint(x: rect.midX, y: rect.midY), radius: radius,
-                    startAngle: .radians(mid - half), endAngle: .radians(mid + half), clockwise: false)
+        if gapHalfAngle > 0 {
+            path.addArc(center: center, radius: radius, startAngle: .radians(mid - half),
+                        endAngle: .radians(mid - gapHalfAngle), clockwise: false)
+            // A new subpath: addArc would otherwise draw a line across the gap.
+            path.move(to: CGPoint(x: center.x + radius * cos(mid + gapHalfAngle),
+                                  y: center.y + radius * sin(mid + gapHalfAngle)))
+            path.addArc(center: center, radius: radius, startAngle: .radians(mid + gapHalfAngle),
+                        endAngle: .radians(mid + half), clockwise: false)
+        } else {
+            path.addArc(center: center, radius: radius, startAngle: .radians(mid - half),
+                        endAngle: .radians(mid + half), clockwise: false)
+        }
         return path
     }
 }

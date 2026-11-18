@@ -58,6 +58,7 @@ final class WheelModel {
     private(set) var items: [WheelItem] = []
     /// Use the unfiltered ring's density in both modes, so ⌘Space never enlarges icons.
     private(set) var iconSize: CGFloat = 0
+    var iconRadius: CGFloat { layout.iconRadius(iconSize: iconSize) }
     private(set) var selectedIndex: Int?
     /// Visual feedback only: grows beyond the rim; keyboard uses the midpoint.
     private(set) var selectionReach: CGFloat = 0.5
@@ -327,8 +328,9 @@ final class WheelModel {
         case favorite
     }
 
-    /// The rail's buttons, from the selection mark outward: × where it can close the window,
-    /// then ★ for any window. None while the rail shows progress.
+    /// What the keys can do: × where it can close the window, ★ for any window. None while
+    /// they show progress. Both keys are always there, a useless × dimmed: the pair stays
+    /// centered on the sector's axis.
     func railButtons(for item: WheelItem) -> [RailButton] {
         guard !isActionRailBusy(for: item), chosenWindow(of: item) != nil else { return [] }
         return closableWindow(of: item) == nil ? [.favorite] : [.close, .favorite]
@@ -458,18 +460,25 @@ final class WheelModel {
         return items[WheelGeometry.index(at: angle, count: items.count)]
     }
 
-    /// Only the buttons on the visible rail are clickable; hidden sectors have none.
-    /// Where two hit areas meet, the nearer button wins.
+    /// The key under the pointer that does something; where hit areas meet, the nearer one.
     func railButton(at point: CGPoint) -> RailButton? {
         guard let index = selectedIndex else { return nil }
         let buttons = railButtons(for: items[index])
-        return buttons.enumerated()
+        return [RailButton.close, .favorite].enumerated()
+            .filter { buttons.contains($0.element) }
             .map { slot, button in
-                let center = layout.railButtonCenter(slot: slot, index: index, count: items.count, buttons: buttons.count)
+                let center = layout.railButtonCenter(slot: slot, index: index, count: items.count)
                 return (button: button, distance: hypot(point.x - center.x, point.y - center.y))
             }
-            .filter { $0.distance <= WheelLayout.closeButtonHitRadius }
+            .filter { $0.distance <= WheelLayout.railKeyHitRadius }
             .min { $0.distance < $1.distance }?.button
+    }
+
+    /// On the selected sector's keys or between them. A click there that hits no working key
+    /// (a dimmed ×, the gap) does nothing rather than switch apps.
+    func isOnRailKeys(at point: CGPoint) -> Bool {
+        guard let index = selectedIndex, showsActionRail(for: items[index]) else { return false }
+        return layout.railKeysContain(point, index: index, count: items.count)
     }
 
     func closeTarget(at point: CGPoint) -> (item: WheelItem, window: AppWindow)? {
@@ -490,8 +499,7 @@ final class WheelModel {
 
     /// The rail of sector `index`, as long as its buttons make it.
     private func railContains(_ point: CGPoint, index: Int) -> Bool {
-        layout.actionRailContains(point, index: index, count: items.count,
-                                  buttons: railButtons(for: items[index]).count)
+        layout.actionRailContains(point, index: index, count: items.count, iconSize: iconSize)
     }
 
     // MARK: Rail button hover
@@ -566,94 +574,108 @@ private extension NSRunningApplication {
 
 /// Wheel sizes, shared by drawing (WheelView) and hit-testing (WheelModel).
 struct WheelLayout {
-    static let standard = WheelLayout(diameter: 560)
+    static let standard = WheelLayout(diameter: 584)
 
     let diameter: CGFloat
 
     var outerRadius: CGFloat { diameter / 2 - 6 }
+    /// Between the icons' band and the rim: room for the selected sector's keys, where no
+    /// icon's marks or window dots reach.
+    static let railLane: CGFloat = 12
     /// The hub: center circle with the window preview and the app name.
-    var innerRadius: CGFloat { diameter * 0.34 }
-    var iconRadius: CGFloat { (outerRadius + innerRadius) / 2 }
+    var innerRadius: CGFloat { (diameter - 2 * Self.railLane) * 0.34 }
+    /// Midway between the hub and the lane: icons are sized on this circle, and the biggest
+    /// sit on it.
+    var bandRadius: CGFloat { (outerRadius - Self.railLane + innerRadius) / 2 }
     /// Box for the preview in the hub; with the name below it still fits inside the circle.
     var previewSize: CGSize { CGSize(width: innerRadius * 1.6, height: innerRadius) }
 
     /// App icons shrink when there are many, so neighbours never touch.
     func iconSize(count: Int) -> CGFloat {
         guard count > 0 else { return 0 }
-        let slotLength = 2 * .pi * iconRadius / CGFloat(count)
+        let slotLength = 2 * .pi * bandRadius / CGFloat(count)
         return min(60, slotLength * 0.64)
     }
 
-    // MARK: Selected sector action rail
+    /// Where icons of `iconSize` sit. The lane is wide enough for the biggest; smaller ones
+    /// move out toward the rim, as far as their marks and window dots stay clear of the keys.
+    func iconRadius(iconSize: CGFloat) -> CGFloat {
+        // From an icon's center to the keys: fitted to how far the marks reach at any angle,
+        // which the tests check.
+        max(bandRadius, railRadius - (0.7 * iconSize + 13))
+    }
 
-    static let closeButtonSize: CGFloat = 16
-    static let closeButtonHitRadius: CGFloat = 11
-    /// The rail with one button; additional buttons grow it equally at both ends.
-    static let actionRailHalfAngle: Double = 0.085
-    static let closeButtonAngleOffset: Double = 0.045
-    /// From one rail button to the next.
-    static let railButtonSpacing: Double = 0.075
-    var actionRailRadius: CGFloat { outerRadius + 4.5 }
+    // MARK: Icon marks
 
-    /// The close action stays on the side opposite the icon’s window badge.
-    func actionRailDirection(index: Int, count: Int) -> Double {
+    /// The selected icon is drawn this much larger.
+    static let selectedIconScale: CGFloat = 1.045
+    /// Between an icon and the window dots under it.
+    static let windowDotsGap: CGFloat = 4
+
+    /// The launcher and favorite marks on an icon's top corners.
+    static func markSize(iconSize: CGFloat) -> CGFloat { max(12, min(17, iconSize * 0.29)) }
+    /// How far a mark sticks out past the icon's corner.
+    static func markOverhang(iconSize: CGFloat) -> CGFloat { iconSize * 0.035 }
+
+    // MARK: Selected sector keys
+
+    /// × and ★ of the selected sector, set into its rim like marks on a dial: side by side
+    /// along the arc, centered on the sector's axis, with the rim broken around them. The
+    /// glyphs stay upright at every angle.
+    static let railKeySize: CGFloat = 16
+    static let railKeyHitRadius: CGFloat = 12
+    /// From one key's center to the next, along the rim.
+    static let railKeySpacing: CGFloat = 24
+    /// On the selection rim, past the lane.
+    var railRadius: CGFloat { outerRadius - 1 }
+
+    /// Key `slot`, × (0) or ★ (1), in reading order: left to right, or top to bottom where the
+    /// rim runs up and down.
+    func railButtonCenter(slot: Int, index: Int, count: Int) -> CGPoint {
+        let axis = WheelGeometry.angle(of: index, count: count)
+        let direction: Double = cos(axis) - sin(axis) >= -0.000_001 ? 1 : -1
+        let offset = (Double(slot) - 0.5) * Self.railKeySpacing
+        let angle = axis + direction * offset / railRadius
+        return CGPoint(x: railRadius * cos(angle), y: railRadius * sin(angle))
+    }
+
+    func closeButtonCenter(index: Int, count: Int) -> CGPoint {
+        railButtonCenter(slot: 0, index: index, count: count)
+    }
+
+    /// Half the angle the keys take on the rim, with room around them: the rim breaks off there.
+    var railKeysHalfAngle: Double {
+        (Self.railKeySpacing / 2 + Self.railKeySize / 2 + 7) / railRadius
+    }
+
+    /// On a key, or on the rim between the two.
+    func railKeysContain(_ point: CGPoint, index: Int, count: Int) -> Bool {
+        let keys = (0..<2).map { railButtonCenter(slot: $0, index: index, count: count) }
+        if keys.contains(where: { hypot(point.x - $0.x, point.y - $0.y) <= Self.railKeyHitRadius }) { return true }
+        let axis = WheelGeometry.angle(of: index, count: count)
+        let offset = atan2(sin(atan2(point.y, point.x) - axis), cos(atan2(point.y, point.x) - axis))
+        return abs(hypot(point.x, point.y) - railRadius) <= Self.railKeyHitRadius
+            && abs(offset) <= Double(Self.railKeySpacing / 2) / railRadius
+    }
+
+    /// Keep the selected owner stable on its keys, between them, and on the way to them
+    /// from its icon.
+    func actionRailContains(_ point: CGPoint, index: Int, count: Int, iconSize: CGFloat) -> Bool {
+        if railKeysContain(point, index: index, count: count) { return true }
         let angle = WheelGeometry.angle(of: index, count: count)
-        return sin(angle) + cos(angle) >= -0.000_001 ? 1 : -1
-    }
-
-    func actionRailAngle(index: Int, count: Int) -> Double {
-        WheelGeometry.angle(of: index, count: count)
-    }
-
-    /// The close button: the rail's first button, when it has one.
-    func closeButtonCenter(index: Int, count: Int, buttons: Int = 2) -> CGPoint {
-        railButtonCenter(slot: 0, index: index, count: count, buttons: buttons)
-    }
-
-    func railButtonCenter(slot: Int, index: Int, count: Int, buttons: Int = 2) -> CGPoint {
-        let offset = Self.closeButtonAngleOffset + Double(slot) * Self.railButtonSpacing - railContentShift(buttons: buttons)
-        let angle = WheelGeometry.angle(of: index, count: count) + actionRailDirection(index: index, count: count) * offset
-        return CGPoint(x: actionRailRadius * cos(angle), y: actionRailRadius * sin(angle))
-    }
-
-    /// Center the whole capsule on the sector, including its buttons and selection mark.
-    func actionRailSpan(index: Int, count: Int, buttons: Int) -> (start: Double, end: Double) {
-        let half = Self.actionRailHalfAngle + railContentShift(buttons: buttons)
-        return (-half, half)
-    }
-
-    func railSelectionSpan(index: Int, count: Int, buttons: Int) -> (start: Double, end: Double) {
-        let shift = railContentShift(buttons: buttons)
-        return actionRailDirection(index: index, count: count) > 0
-            ? (-0.065 - shift, -0.005 - shift)
-            : (0.005 + shift, 0.065 + shift)
-    }
-
-    private func railContentShift(buttons: Int) -> Double {
-        Double(max(buttons, 1) - 1) * Self.railButtonSpacing / 2
-    }
-
-    /// The visible arc and a narrow approach from its icon to each button keep the selected
-    /// owner stable.
-    func actionRailContains(_ point: CGPoint, index: Int, count: Int, buttons: Int = 2) -> Bool {
-        let angle = WheelGeometry.angle(of: index, count: count)
-        let railAngle = actionRailAngle(index: index, count: count)
-        let offset = atan2(sin(atan2(point.y, point.x) - railAngle), cos(atan2(point.y, point.x) - railAngle))
-        let span = actionRailSpan(index: index, count: count, buttons: buttons)
-        if abs(hypot(point.x, point.y) - actionRailRadius) <= Self.closeButtonHitRadius,
-           offset >= span.start - 0.035, offset <= span.end + 0.035 { return true }
-        let start = CGPoint(x: iconRadius * cos(angle), y: iconRadius * sin(angle))
-        return (0..<max(buttons, 1)).contains { slot in
-            let end = railButtonCenter(slot: slot, index: index, count: count, buttons: buttons)
+        let radius = iconRadius(iconSize: iconSize)
+        let start = CGPoint(x: radius * cos(angle), y: radius * sin(angle))
+        return (0..<2).contains { slot in
+            let end = railButtonCenter(slot: slot, index: index, count: count)
             let dx = end.x - start.x, dy = end.y - start.y
             let t = ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)
             guard t >= 0, t <= 1 else { return false }
-            return hypot(point.x - start.x - t * dx, point.y - start.y - t * dy) <= Self.closeButtonHitRadius
+            return hypot(point.x - start.x - t * dx, point.y - start.y - t * dy) <= Self.railKeyHitRadius
         }
     }
 
     /// What the wheel view draws on: the wheel plus room for what sticks out past the rim
-    /// (the close action, shadows).
+    /// (the keys, shadows).
     var canvasSize: CGFloat { diameter + 80 }
 }
 
