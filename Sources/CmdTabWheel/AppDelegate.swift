@@ -128,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showAbout() {
         let centered = NSMutableParagraphStyle()
         centered.alignment = .center
-        let repository = "github.com/faustienf/tabwheel"
+        let repository = "github.com/faustienf/tabhud"
         let credits = NSAttributedString(string: repository, attributes: [
             .link: URL(string: "https://\(repository)")!,
             .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),

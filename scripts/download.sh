@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Installs or updates ⌘Tab HUD from the latest GitHub release. No Xcode, no clone:
 #
-#   curl -fsSL https://raw.githubusercontent.com/faustienf/tabwheel/main/scripts/download.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/faustienf/tabhud/main/scripts/download.sh | bash
 #
 # The app isn't notarized. Downloaded by a browser, macOS won't open it until Privacy & Security
 # → Open Anyway; downloaded by curl, it opens like an app built here.
-# TABWHEEL_ZIP: another zip to install (a release's own link, or a file:// one).
+# TABHUD_ZIP: another zip to install (a release's own link, or a file:// one).
 set -euo pipefail
 
 EXECUTABLE="CmdTabWheel"
 APP_NAME="⌘Tab HUD.app" # the file's name is what Finder and System Settings show
 OLD_APP_NAME="$EXECUTABLE.app" # its name up to v22: a copy under it gets replaced
-ZIP="${TABWHEEL_ZIP:-https://github.com/faustienf/tabwheel/releases/latest/download/$EXECUTABLE.zip}"
+ZIP="${TABHUD_ZIP:-https://github.com/faustienf/tabhud/releases/latest/download/$EXECUTABLE.zip}"
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
 fail() {
