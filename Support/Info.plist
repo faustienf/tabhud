@@ -11,9 +11,9 @@
 	<key>CFBundleIdentifier</key>
 	<string>com.faustienf.CmdTabWheel</string>
 	<key>CFBundleName</key>
-	<string>CmdTabWheel</string>
+	<string>⌘Tab HUD</string>
 	<key>CFBundleDisplayName</key>
-	<string>⌘Tab Wheel</string>
+	<string>⌘Tab HUD</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

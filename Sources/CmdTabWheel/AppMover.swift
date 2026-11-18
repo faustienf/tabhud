@@ -13,6 +13,8 @@ enum AppMover {
     private static let suppressedKey = "moveToApplicationsSuppressed"
     /// "Open at login" was on for the old copy; the moved copy turns it back on for itself.
     private static let reRegisterLoginItemKey = "reRegisterLoginItemAfterMove"
+    /// The app's file name up to v22.
+    private static let oldName = "CmdTabWheel.app"
 
     /// True when the app is moving and relaunching: the caller should stop launching.
     static func moveIfNeeded() -> Bool {
@@ -21,6 +23,7 @@ enum AppMover {
         return false
         #else
         let running = Bundle.main.bundleURL
+        if isInApplicationsFolder(running) { replaceCopiesUnderOldName() }
         guard running.pathExtension == "app",
               !isInApplicationsFolder(running),
               !UserDefaults.standard.bool(forKey: suppressedKey)
@@ -133,7 +136,7 @@ enum AppMover {
         let alert = NSAlert()
         alert.messageText = "Move to the Applications folder?"
         alert.informativeText = """
-            ⌘Tab Wheel is running from “\(FileManager.default.displayName(atPath: source.deletingLastPathComponent().path))”. \
+            ⌘Tab HUD is running from “\(FileManager.default.displayName(atPath: source.deletingLastPathComponent().path))”. \
             Moved to Applications, it can open at login and won’t vanish when this folder gets cleaned up.
             """
         alert.addButton(withTitle: "Move to Applications")
@@ -166,6 +169,27 @@ enum AppMover {
         xattr.arguments = ["-dr", "com.apple.quarantine", destination.path]
         try? xattr.run()
         xattr.waitUntilExit()
+    }
+
+    /// A copy still named CmdTabWheel.app is an older version this one replaces: dragged from the
+    /// disk image, the new name doesn't make Finder ask to replace it, and moved here by Move to
+    /// Applications, the old one was never in the way. Left there, it would fight this one over
+    /// ⌘Tab, and System Settings could list it instead.
+    private static func replaceCopiesUnderOldName() {
+        let me = Bundle.main.bundleURL.resolvingSymlinksInPath()
+        for folder in applicationsFolders {
+            let old = folder.appendingPathComponent(oldName, isDirectory: true)
+            guard old.resolvingSymlinksInPath() != me, // renamed back by the user: it's this one
+                  Bundle(url: old)?.bundleIdentifier == Bundle.main.bundleIdentifier
+            else { continue }
+            quitApp(at: old)
+            do {
+                try FileManager.default.trashItem(at: old, resultingItemURL: nil)
+                log.notice("the copy under the old name went to the Trash")
+            } catch {
+                log.error("couldn't trash the copy under the old name: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     /// An older copy being replaced may be running (two copies would fight over ⌘Tab).
@@ -214,7 +238,7 @@ enum AppMover {
 
     private static func showFailure(_ error: Error) {
         let alert = NSAlert()
-        alert.messageText = "Couldn’t move ⌘Tab Wheel to Applications"
+        alert.messageText = "Couldn’t move ⌘Tab HUD to Applications"
         alert.informativeText = "\(error.localizedDescription)\n\nYou can drag it there in Finder yourself."
         alert.runModal()
     }

@@ -10,7 +10,7 @@
             ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
             <ActionContent
                title = "Bundle .app"
-               scriptText = "ROOT=&quot;${WORKSPACE_PATH%/.swiftpm/xcode/package.xcworkspace}&quot;&#10;&quot;$ROOT/scripts/setup.sh&quot; bundle &quot;$BUILT_PRODUCTS_DIR/$PRODUCT_NAME&quot; &quot;$ROOT/build/CmdTabWheel.app&quot;&#10;">
+               scriptText = "ROOT=&quot;${WORKSPACE_PATH%/.swiftpm/xcode/package.xcworkspace}&quot;&#10;&quot;$ROOT/scripts/setup.sh&quot; bundle &quot;$BUILT_PRODUCTS_DIR/$PRODUCT_NAME&quot; &quot;$ROOT/build/⌘Tab HUD.app&quot;&#10;">
                <EnvironmentBuildable>
                   <BuildableReference
                      BuildableIdentifier = "primary"
@@ -81,7 +81,7 @@
             ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
             <ActionContent
                title = "Restore system Cmd-Tab"
-               scriptText = "ROOT=&quot;${WORKSPACE_PATH%/.swiftpm/xcode/package.xcworkspace}&quot;&#10;&quot;$ROOT/build/CmdTabWheel.app/Contents/MacOS/CmdTabWheel&quot; --restore-native-switcher&#10;">
+               scriptText = "ROOT=&quot;${WORKSPACE_PATH%/.swiftpm/xcode/package.xcworkspace}&quot;&#10;&quot;$ROOT/build/⌘Tab HUD.app/Contents/MacOS/CmdTabWheel&quot; --restore-native-switcher&#10;">
                <EnvironmentBuildable>
                   <BuildableReference
                      BuildableIdentifier = "primary"
@@ -97,7 +97,7 @@
       <PathRunnable
          runnableDebuggingMode = "0"
          BundleIdentifier = "com.faustienf.CmdTabWheel"
-         FilePath = "/Users/faustienf/projects/cmd-tab-wheel/build/CmdTabWheel.app">
+         FilePath = "/Users/faustienf/projects/cmd-tab-wheel/build/⌘Tab HUD.app">
       </PathRunnable>
       <MacroExpansion>
          <BuildableReference
@@ -117,7 +117,7 @@
       debugDocumentVersioning = "YES">
       <PathRunnable
          runnableDebuggingMode = "0"
-         FilePath = "/Users/faustienf/projects/cmd-tab-wheel/build/CmdTabWheel.app">
+         FilePath = "/Users/faustienf/projects/cmd-tab-wheel/build/⌘Tab HUD.app">
       </PathRunnable>
       <MacroExpansion>
          <BuildableReference

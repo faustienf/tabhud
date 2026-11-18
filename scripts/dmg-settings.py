@@ -1,5 +1,5 @@
 # The DMG's window, for dmgbuild; scripts/setup.sh package runs it:
-#   dmgbuild -s scripts/dmg-settings.py -D app=… -D background=… "⌘Tab Wheel v19" CmdTabWheel.dmg
+#   dmgbuild -s scripts/dmg-settings.py -D app=… -D background=… "⌘Tab HUD v19" CmdTabWheel.dmg
 # The window size and the icons' centers match scripts/draw-dmg-background.swift.
 import os.path
 

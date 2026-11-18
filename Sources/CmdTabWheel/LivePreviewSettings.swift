@@ -26,7 +26,7 @@ final class LivePreviewSettings {
         item.view = SwitchMenuItemView(title: "Live Preview", isOn: isEnabled) { [weak self] enabled in
             self?.setEnabled(enabled)
         }
-        item.toolTip = "Continuously update the selected window preview while the wheel is open."
+        item.toolTip = "Continuously update the selected window preview while the HUD is open."
         return item
     }
 }

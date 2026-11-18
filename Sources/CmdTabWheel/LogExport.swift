@@ -17,8 +17,8 @@ enum LogExport {
     static func save() {
         let panel = NSSavePanel()
         panel.title = "Save Log"
-        panel.message = "A text file to attach to a bug report: what ⌘Tab Wheel did since it started, and a few facts about this Mac."
-        panel.nameFieldStringValue = "CmdTabWheel v\(AppVersion.number) log \(fileDate()).txt"
+        panel.message = "A text file to attach to a bug report: what ⌘Tab HUD did since it started, and a few facts about this Mac."
+        panel.nameFieldStringValue = "⌘Tab HUD v\(AppVersion.number) log \(fileDate()).txt"
         panel.allowedContentTypes = [.plainText]
         panel.directoryURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
         NSApp.activate() // a menu bar app's panel would open behind the front app
@@ -46,12 +46,12 @@ enum LogExport {
         let wheelEnabled = UserDefaults.standard.object(forKey: "wheelEnabled") as? Bool ?? true
         let secureInput = IsSecureEventInputEnabled() ? "on, held by \(SecureInput.ownerName() ?? "an app")" : "off"
         return """
-            ⌘Tab Wheel \(AppVersion.description)\(isInApplications ? "" : ", not in an Applications folder")
+            ⌘Tab HUD \(AppVersion.description)\(isInApplications ? "" : ", not in an Applications folder")
             macOS \(ProcessInfo.processInfo.operatingSystemVersionString), \(hardwareModel())
             Displays: \(NSScreen.screens.count)
             Accessibility: \(Permissions.hasAccessibility ? "granted" : "NOT granted")
             Screen Recording: \(Permissions.hasScreenRecording ? "granted" : "not granted")
-            Wheel: \(wheelEnabled ? "on" : "off")
+            HUD: \(wheelEnabled ? "on" : "off")
             Secure Input: \(secureInput)
             Saved: \(Date().formatted(date: .abbreviated, time: .standard))
 
@@ -92,7 +92,7 @@ enum LogExport {
             at: folder, includingPropertiesForKeys: [.contentModificationDateKey]
         )) ?? []
         let latest = reports
-            .filter { $0.lastPathComponent.hasPrefix("CmdTabWheel") }
+            .filter { $0.lastPathComponent.hasPrefix("CmdTabWheel") } // the binary's name, not the app's
             .compactMap { url -> (URL, Date)? in
                 guard let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
                       date > weekAgo

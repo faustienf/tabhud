@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ⌘Tab Wheel: install, update, develop. Asks what to do:
+# ⌘Tab HUD: install, update, develop. Asks what to do:
 #
 #   scripts/setup.sh
 #
@@ -17,7 +17,8 @@ cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
 EXECUTABLE="CmdTabWheel"
-APP_NAME="$EXECUTABLE.app"
+APP_NAME="⌘Tab HUD.app" # the file's name is what Finder and System Settings show
+OLD_APP_NAME="$EXECUTABLE.app" # its name up to v22: a copy under it gets replaced
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
 fail() {
@@ -26,7 +27,7 @@ fail() {
 }
 
 menu() {
-  echo "⌘Tab Wheel"
+  echo "⌘Tab HUD"
   echo "  1) Install or update: build it, put it in Applications, start it"
   echo "  2) Develop: a debug build from build/, with its log in this window"
   echo "  3) Run the tests"
@@ -48,11 +49,10 @@ menu() {
 # goes to /Applications, or to ~/Applications for a user who can't write there.
 install_app() {
   check_tools
-  local dest stage="build/setup" status
-  if [ -d "/Applications/$APP_NAME" ]; then
-    dest="/Applications/$APP_NAME"
-  elif [ -d "$HOME/Applications/$APP_NAME" ]; then
-    dest="$HOME/Applications/$APP_NAME"
+  local old dest stage="build/setup" status
+  old="$(installed_copy)"
+  if [ -n "$old" ]; then
+    dest="$(dirname "$old")/$APP_NAME"
   elif [ -w /Applications ]; then
     dest="/Applications/$APP_NAME"
   else
@@ -66,20 +66,20 @@ install_app() {
   "$LSREGISTER" -u "$stage/$APP_NAME" # only the installed copy should be known to the system
 
   stop_running "$stage/$APP_NAME"
-  if [ -e "$dest" ]; then
-    echo "▸ replacing $dest"
+  if [ -n "$old" ]; then
+    echo "▸ replacing $old"
     # The old copy is moved out (and deleted along with $stage below), not deleted in place:
     # if the new one can't get in, the old one goes back.
-    if ! mv "$dest" "$stage/old-$APP_NAME"; then
-      open "$dest" # it was quit above
-      fail "couldn't move the old $dest out of the way.
+    if ! mv "$old" "$stage/old-$APP_NAME"; then
+      open "$old" # it was quit above
+      fail "couldn't move the old $old out of the way.
   If macOS said your terminal was prevented from modifying apps: System Settings → Privacy & Security
   → App Management → turn your terminal on, then run this again. Or drag $ROOT/$stage/$APP_NAME
   into Applications in Finder yourself."
     fi
     if ! mv "$stage/$APP_NAME" "$dest"; then
-      mv "$stage/old-$APP_NAME" "$dest"
-      open "$dest"
+      mv "$stage/old-$APP_NAME" "$old"
+      open "$old"
       fail "couldn't put the new app into $(dirname "$dest"); the old one is back and running"
     fi
     status="updated"
@@ -93,7 +93,7 @@ install_app() {
   "$LSREGISTER" -f "$dest"
 
   open "$dest"
-  echo "✓ ⌘Tab Wheel $(version_of "$dest") $status: $dest"
+  echo "✓ ⌘Tab HUD $(version_of "$dest") $status: $dest"
   if [ "$status" = "installed" ]; then
     echo "  It's in the menu bar now; its setup window asks for the permissions it needs."
   fi
@@ -101,7 +101,7 @@ install_app() {
 
 # MARK: - Develop
 
-# Debug build → build/CmdTabWheel.app (where Xcode's ⌘R puts it too) → start it → follow its log.
+# Debug build → build/⌘Tab HUD.app (where Xcode's ⌘R puts it too) → start it → follow its log.
 # Ctrl+C stops following the log; the app keeps running (quit it from the menu bar icon).
 run_dev() {
   check_tools
@@ -154,8 +154,8 @@ package_app() {
   echo "▸ drawing the DMG window"
   swift scripts/draw-dmg-background.swift "$out/dmg-background.tiff"
   "$dmgbuild" -s scripts/dmg-settings.py -D app="$app" -D background="$out/dmg-background.tiff" \
-    "⌘Tab Wheel $version" "$out/$EXECUTABLE.dmg" >/dev/null
-  echo "✓ $out/$EXECUTABLE.dmg and .zip: ⌘Tab Wheel $(version_of "$app")"
+    "⌘Tab HUD $version" "$out/$EXECUTABLE.dmg" >/dev/null
+  echo "✓ $out/$EXECUTABLE.dmg and .zip: ⌘Tab HUD $(version_of "$app")"
 }
 
 # dmgbuild lays out the DMG window without Finder, so it works on CI too. It's a Python tool:
@@ -186,7 +186,7 @@ release() {
   local tag
   tag="v$(version_number)"
   ! git rev-parse --quiet --verify "refs/tags/$tag" >/dev/null || fail "$tag is out already"
-  git tag --annotate "$tag" --message "⌘Tab Wheel $tag"
+  git tag --annotate "$tag" --message "⌘Tab HUD $tag"
   git push --quiet origin "refs/tags/$tag"
   local repo
   repo="$(git remote get-url origin | sed -E 's#^(git@github\.com:|https://github\.com/)##; s#\.git$##')"
@@ -199,7 +199,7 @@ release() {
 
 restore_switcher() {
   local app
-  for app in "/Applications/$APP_NAME" "$HOME/Applications/$APP_NAME" "build/$APP_NAME"; do
+  for app in "$(installed_copy)" "build/$APP_NAME"; do
     [ -x "$app/Contents/MacOS/$EXECUTABLE" ] || continue
     stop_running "$app" # quitting gives ⌘Tab back by itself; this covers a crashed app
     "$app/Contents/MacOS/$EXECUTABLE" --restore-native-switcher
@@ -213,7 +213,7 @@ restore_switcher() {
 
 check_tools() {
   [ "$(id -u)" -ne 0 ] || fail "run it without sudo"
-  [ "$(sw_vers -productVersion | cut -d. -f1)" -ge 14 ] || fail "⌘Tab Wheel needs macOS 14 or later"
+  [ "$(sw_vers -productVersion | cut -d. -f1)" -ge 14 ] || fail "⌘Tab HUD needs macOS 14 or later"
   use_xcode
   xcrun --find swift >/dev/null 2>&1 \
     || fail "no Swift here: install Xcode 16 or later from the App Store, open it once, then run this again"
@@ -228,6 +228,20 @@ use_xcode() {
   fi
 }
 
+# The copy in /Applications or ~/Applications, under the app's name or its old one; nothing if
+# there's none.
+installed_copy() {
+  local folder name
+  for folder in /Applications "$HOME/Applications"; do
+    for name in "$APP_NAME" "$OLD_APP_NAME"; do
+      if [ -d "$folder/$name" ]; then
+        echo "$folder/$name"
+        return
+      fi
+    done
+  done
+}
+
 # Quits every running copy, whatever folder it runs from. Two copies would fight over ⌘Tab, and
 # `open` only brings a running copy forward: it doesn't start a newer one from somewhere else.
 # $1: an app whose binary can give ⌘Tab back to macOS if a copy has to be killed.
@@ -236,7 +250,7 @@ stop_running() {
   user_id="$(id -u)"
   # SIGTERM = graceful quit: the app gives the system ⌘Tab back before exiting.
   pkill -x -U "$user_id" "$EXECUTABLE" || return 0 # nothing running
-  echo "▸ quitting the running ⌘Tab Wheel"
+  echo "▸ quitting the running ⌘Tab HUD"
   for _ in $(seq 30); do
     pgrep -x -U "$user_id" "$EXECUTABLE" >/dev/null || return 0
     sleep 0.1
@@ -280,10 +294,10 @@ version_of() {
 }
 
 # Wraps a built binary into an .app and signs it. An .app is just a folder:
-#   CmdTabWheel.app/Contents/Info.plist        ← bundle id, LSUIElement, version…
-#   CmdTabWheel.app/Contents/MacOS/CmdTabWheel ← the binary
-#   CmdTabWheel.app/Contents/Resources/        ← the icon: Assets.car (macOS 26 glass icon
-#                                                 and older systems) + AppIcon.icns (fallback)
+#   ⌘Tab HUD.app/Contents/Info.plist        ← bundle id, LSUIElement, version…
+#   ⌘Tab HUD.app/Contents/MacOS/CmdTabWheel ← the binary
+#   ⌘Tab HUD.app/Contents/Resources/        ← the icon: Assets.car (macOS 26 glass icon
+#                                              and older systems) + AppIcon.icns (fallback)
 bundle_app() {
   local bin="$1" app="$2"
   local info_plist="$ROOT/Support/Info.plist"
@@ -311,6 +325,13 @@ bundle_app() {
 
   echo "▸ assembling $app"
   rm -rf "$app"
+  # One built here under the old name goes: Launch Services could show that one instead.
+  local old
+  old="$(dirname "$app")/$OLD_APP_NAME"
+  if [ -d "$old" ]; then
+    "$LSREGISTER" -u "$old"
+    rm -rf "$old"
+  fi
   mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
   cp "$bin" "$app/Contents/MacOS/$EXECUTABLE"
   cp "$info_plist" "$app/Contents/Info.plist"

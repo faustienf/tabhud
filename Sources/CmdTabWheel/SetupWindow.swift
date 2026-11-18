@@ -38,7 +38,7 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
     private func makeWindow() -> NSWindow {
         let view = SetupView(model: model) { [weak self] in self?.finish() }
         let window = NSWindow(contentViewController: NSHostingController(rootView: view))
-        window.title = "⌘Tab Wheel Setup"
+        window.title = "⌘Tab HUD Setup"
         window.styleMask = [.titled, .closable, .fullSizeContentView]
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -144,7 +144,7 @@ struct SetupView: View {
                     tag: "Optional",
                     detail: model.askedForScreenRecording && !model.hasScreenRecording
                         ? "Once you switch it on, macOS asks to quit and reopen the app. Choose Quit & Reopen."
-                        : "Shows window previews in the wheel. Without it you see app icons.",
+                        : "Shows window previews in the HUD. Without it you see app icons.",
                     isGranted: model.hasScreenRecording,
                     action: model.requestScreenRecording
                 )
@@ -169,9 +169,9 @@ struct SetupView: View {
                 .frame(width: 72, height: 72)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Welcome to ⌘Tab Wheel")
+                Text("Welcome to ⌘Tab HUD")
                     .font(.title2.weight(.semibold))
-                Text("Hold ⌘ and press Tab to open a wheel of your apps, point at one and let go. It needs a couple of permissions first.")
+                Text("Hold ⌘ and press Tab to open the HUD with your apps, point at one and let go. It needs a couple of permissions first.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

@@ -36,14 +36,32 @@ enum Permissions {
 /// "Open at login" through the system Login Items list (System Settings → General → Login Items).
 @MainActor
 enum LoginItem {
+    /// Where the app was when it was last added.
+    private static let pathKey = "loginItemPath"
+
     static var status: SMAppService.Status { SMAppService.mainApp.status }
 
     static func setEnabled(_ enabled: Bool) throws {
         if enabled {
             try SMAppService.mainApp.register()
+            UserDefaults.standard.set(Bundle.main.bundlePath, forKey: pathKey)
         } else {
             try SMAppService.mainApp.unregister()
         }
+    }
+
+    /// Login Items remember where the app was when it was added. Somewhere else now (an update
+    /// renamed CmdTabWheel.app to ⌘Tab HUD.app, or it was dragged to another folder), it's
+    /// added again from here, or the next login would look for it where it no longer is.
+    static func followMove() {
+        #if !DEBUG // a debug build in build/ mustn't take the installed copy's place
+        guard status == .enabled,
+              UserDefaults.standard.string(forKey: pathKey) != Bundle.main.bundlePath
+        else { return }
+        log.notice("re-adding the login item from the app's new place")
+        try? setEnabled(false)
+        try? setEnabled(true)
+        #endif
     }
 
     static func openSettings() {

@@ -20,11 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        log.notice("⌘Tab Wheel \(AppVersion.description, privacy: .public) started")
+        log.notice("⌘Tab HUD \(AppVersion.description, privacy: .public) started")
         appearanceSettings.apply()
         // First of all: a copy that's about to move to /Applications and relaunch shouldn't
         // grab ⌘Tab or open setup.
         if AppMover.moveIfNeeded() { return }
+        LoginItem.followMove()
         wheel.setLivePreviewEnabled(livePreviewSettings.isEnabled)
         livePreviewSettings.onChange = { [weak self] enabled in self?.wheel.setLivePreviewEnabled(enabled) }
         setUpStatusItem()
@@ -86,12 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// LSUIElement apps have no Dock icon and no menu bar — this icon is the only way to quit.
     private func setUpStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "circle.circle", accessibilityDescription: "⌘Tab Wheel")
+        item.button?.image = NSImage(systemSymbolName: "circle.circle", accessibilityDescription: "⌘Tab HUD")
         item.button?.appearsDisabled = !isWheelEnabled // dimmed icon = wheel is off
 
         let menu = NSMenu()
         let switchItem = NSMenuItem()
-        switchItem.view = SwitchMenuItemView(title: "⌘Tab Wheel", isOn: isWheelEnabled, isHeading: true) { [weak self] isOn in
+        switchItem.view = SwitchMenuItemView(title: "⌘Tab HUD", isOn: isWheelEnabled, isHeading: true) { [weak self] isOn in
             self?.setWheelEnabled(isOn)
         }
         menu.addItem(switchItem)
@@ -111,7 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         aboutItem.target = self
         menu.addItem(aboutItem)
         menu.addItem(
-            withTitle: "Quit ⌘Tab Wheel",
+            withTitle: "Quit ⌘Tab HUD",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
@@ -135,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
         NSApp.activate() // a menu bar app's panel would open behind the front app
         NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: "⌘Tab Wheel",
+            .applicationName: "⌘Tab HUD",
             .applicationVersion: AppVersion.number,
             .version: AppVersion.commit,
             .credits: credits,

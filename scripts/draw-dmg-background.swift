@@ -118,7 +118,7 @@ func draw(in cg: CGContext) {
     drawCentered(text([
         ("Drag ", mono(19, .semibold), ink),
         ("⌘", mono(19, .semibold), accent),
-        ("Tab Wheel into Applications", mono(19, .semibold), ink),
+        ("Tab HUD into Applications", mono(19, .semibold), ink),
     ]), y: 62)
 
     // Arrow from the app to Applications.

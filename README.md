@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="docs/icon.png" width="128" height="128" alt="⌘Tab Wheel icon">
+  <img src="docs/icon.png" width="128" height="128" alt="⌘Tab HUD icon">
 </p>
 
-<h1 align="center">⌘Tab Wheel</h1>
+<h1 align="center">⌘Tab HUD</h1>
 
 <p align="center">A radial app switcher for macOS: hold ⌘, press Tab, point at an app, let go.</p>
 
 <p align="center">
-  <img src="docs/desktop-preview.jpg" width="960" alt="Desktop demo of ⌘Tab Wheel over light Safari and dark Finder windows on a deep blue space desktop with an illuminated rocky planet and distant galaxy: nineteen apps across twenty sectors, two Terminal windows, the first selected with a Started by Codex launch mark, and window contours visible through the green glass wheel">
+  <img src="docs/desktop-preview.jpg" width="960" alt="Desktop demo of ⌘Tab HUD over light Safari and dark Finder windows on a deep blue space desktop with an illuminated rocky planet and distant galaxy: nineteen apps across twenty sectors, two Terminal windows, the first selected with a Started by Codex launch mark, and window contours visible through the green glass HUD">
 </p>
 
 ## Features
@@ -18,8 +18,8 @@
 - Apps with several windows get a sector per window
 - Windows on other desktops and minimized ones are there too
 - Window previews, live after a second (Live Preview in the menu bar)
-- Close windows and quit apps without leaving the wheel
-- Favorite windows: star them on the wheel, ⌘Space shows only them
+- Close windows and quit apps without leaving the HUD
+- Favorite windows: star them in the HUD, ⌘Space shows only them
 - Lives in the menu bar; light and dark
 
 ## Install
@@ -50,7 +50,7 @@ It asks what to do; the first answer, the default, builds the app, puts it in Ap
 
 | | |
 |---|---|
-| ⌘Tab | Open the wheel |
+| ⌘Tab | Open the HUD |
 | Pointer, Tab, ⇧Tab | Select |
 | Release ⌘, or click | Switch |
 | ⌘W, or × on the selected sector’s rim | Close the selected window; the app's last one quits the app, and so does ⌘W on an app with no windows |

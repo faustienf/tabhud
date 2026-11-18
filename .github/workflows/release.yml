@@ -30,4 +30,4 @@ jobs:
           fi
           echo "How to install: https://github.com/$GITHUB_REPOSITORY#install" >> "$notes"
           gh release create "$GITHUB_REF_NAME" build/release/CmdTabWheel.dmg build/release/CmdTabWheel.zip \
-            --title "⌘Tab Wheel $GITHUB_REF_NAME" --notes-file "$notes"
+            --title "⌘Tab HUD $GITHUB_REF_NAME" --notes-file "$notes"
